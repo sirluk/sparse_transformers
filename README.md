@@ -26,7 +26,9 @@ The project structure looks as follows
  ┃ ┃ ┣ 📜model_adv.py (baseline model for adverserial training) \
  ┃ ┃ ┣ 📜model_base.py (contains base classes with methods that are used by all models) \
  ┃ ┃ ┣ 📜model_diff_adv.py (model with 2 subnetworks for adverserial training) \
+ ┃ ┃ ┣ 📜model_diff_modular.py (model with 2 subnetworks for task and adv training) \
  ┃ ┃ ┣ 📜model_diff_task.py (model with subnetwork for task training) \
+ ┃ ┃ ┣ 📜model_doublediff.py (model where subnetwork for adv training is a subnetwork of the task subnetwork) \
  ┃ ┃ ┣ 📜model_heads.py (classifier and adverserial head classes) \
  ┃ ┃ ┣ 📜model_task.py (baseline model for task training) \
  ┃ ┃ ┗ 📜weight_parametrizations.py (contains weight parametrizations for subnetwork training*) \
@@ -35,12 +37,11 @@ The project structure looks as follows
  ┃ ┣ 📜metrics.py \
  ┃ ┣ 📜training_logger.py \
  ┃ ┗ 📜utils.py \
- ┣ 📜AdvBERT_script.py (testing script for training to verify modular code is working)\
- ┣ 📜AdvBERT_script2.py (second testing script for training which contains old model classes from main branch)\
  ┣ 📜cfg.yml (hyperparameters)\
  ┣ 📜environment.yml (conda environment config)\
  ┣ 📜main.py (main file to run experiments with)\
  ┣ 📜main_attack.py (used to run an adverserial attack only using a model checkpoint)\
+ ┣ 📜main_doublediff.py (used to run doublediff model)\
  ┗ 📜readme.md
 
 \* Weight parametrizations are implemented as modules and use pytorch parametrizations functionality [LINK](https://pytorch.org/tutorials/intermediate/parametrizations.html)
@@ -72,6 +73,8 @@ Optional arguments with example inputs
 Run baseline or diff-pruning
 * --adv=True \
 Run adverserial training
+* --modular=True \
+Run modular architecture (overwrites adv argument)
 * --gpu_id 0 1 2 3 \
 Which gpus to run experiment on (can be multiple)
 * --debug=True \
