@@ -1,3 +1,11 @@
+# custom
+test*.ipynb
+test*.py
+logs*
+checkpoints*
+DEBUG_checkpoints*
+DEBUG_logs*
+
 # Byte-compiled / optimized / DLL files
 __pycache__/
 *.py[cod]
