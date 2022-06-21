@@ -189,7 +189,8 @@ class ModularDiffModel(BasePruningModel):
                 loss_fn_protected,
                 pred_fn_protected,
                 metrics_protected,
-                predict_prot=True
+                predict_prot=True,
+                debiased=True
             )
             logger.validation_loss(epoch, result_protected, suffix="protected")
 
