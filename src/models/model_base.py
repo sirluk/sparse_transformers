@@ -218,7 +218,7 @@ class BasePruningModel(BaseModel):
     def _count_non_zero_params(self, idx: int = 0) -> Tuple[int, int, int]:
         assert self._parametrized, "Function only implemented for diff pruning"
 
-        l = [self._count_params_for_module(m, idx) for m in self.get_encoder_base_modules()]
+        l = [self._count_non_zero_params_for_module(m, idx) for m in self.get_encoder_base_modules()]
         return [sum(x) for x in list(zip(*l))]
 
 
