@@ -78,7 +78,11 @@ def main():
     parser.add_argument("--debug", type=bool, default=False, help="Whether to run on small subset for testing")
     parser.add_argument("--run_adv_attack", type=bool, default=True, help="Set to false if you do not want to run adverserial attack after training")
     parser.add_argument("--gpu_id", nargs="*", type=int, default=[0], help="")
+    parser.add_argument("--seed", type=int, default=0, help="torch random seed")
     base_args = parser.parse_args()
+
+    torch.manual_seed(base_args.seed)
+    print(f"torch.manual_seed({base_args.seed})")
 
     with open("cfg.yml", "r") as f:
         cfg = yaml.safe_load(f)

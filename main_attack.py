@@ -27,8 +27,11 @@ def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--debug", type=bool, default=False, help="Whether to run on small subset for testing")
     parser.add_argument("--gpu_id", nargs="*", type=int, default=[0], help="")
-    parser.add_argument("--raw", type=bool, default=False, help="")
+    parser.add_argument("--seed", type=int, default=0, help="torch random seed")
     base_args = parser.parse_args()
+
+    torch.manual_seed(base_args.seed)
+    print(f"torch.manual_seed({base_args.seed})")
 
     device = get_device(base_args.gpu_id)
 
