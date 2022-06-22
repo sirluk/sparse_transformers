@@ -276,8 +276,11 @@ class AdvModel(BaseModel):
             "adv_head_state_dict": self.adv_head.state_dict()
         }
 
+        output_dir = Path(output_dir)
+        output_dir.mkdir(parents=True, exist_ok=True)
+
         filename = f"{self.model_name.split('/')[-1]}-adv_baseline.pt"
-        filepath = Path(output_dir) / filename
+        filepath = output_dir / filename
         torch.save(info_dict, filepath)
         return filepath
 

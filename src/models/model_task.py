@@ -213,6 +213,7 @@ class TaskModel(BaseModel):
 
         output_dir = Path(output_dir)
         output_dir.mkdir(parents=True, exist_ok=True)
+        
         filename = f"{self.model_name.split('/')[-1]}-task_baseline.pt"
         filepath = output_dir / filename
         torch.save(info_dict, filepath)
