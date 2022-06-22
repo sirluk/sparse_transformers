@@ -253,7 +253,7 @@ class BasePruningModel(BaseModel):
             if isinstance(par, DiffWeightFixmask):
                 n_p = par.mask.numel()
                 n_p_zero = (~par_list[idx].mask).sum()
-                n_p_one = (n_p_ - n_p_zero_)
+                n_p_one = (n_p - n_p_zero)
             else:
                 z = par.z.detach()
                 n_p = z.numel()

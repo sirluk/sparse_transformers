@@ -155,7 +155,11 @@ class ModularDiffModel(BasePruningModel):
 
             # switch to fixed mask training
             if epoch == num_epochs_finetune:
-                self._finetune_to_fixmask(fixmask_pct, n_parametrizations = (1 + sparse_task), merged_cutoff)
+                self._finetune_to_fixmask(
+                    fixmask_pct,
+                    n_parametrizations = (1 + sparse_task),
+                    merged_cutoff = merged_cutoff
+                )
                 self._init_optimizer_and_schedule(
                     train_steps_fixmask,
                     learning_rate,
