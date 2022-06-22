@@ -167,8 +167,20 @@ class BasePruningModel(BaseModel):
 
 
     @property
-    def _parametrized(self) -> bool:
+    def parametrized(self) -> bool:
         return (self.model_state == ModelState.FINETUNING or self.model_state == ModelState.FIXMASK)
+
+    @property
+    def fixmask_state(self) -> bool:
+        return self.model_state == ModelState.FIXMASK
+
+    @property
+    def finetune_state(self) -> bool:
+        return self.model_state == ModelState.FINETUNING
+
+    @property
+    def n_parametrizations(self) -> int:
+        return len(list(self.get_encoder_base_modules()[0].parametrizations.values())[0])
 
 
     @staticmethod
@@ -182,7 +194,7 @@ class BasePruningModel(BaseModel):
 
 
     def get_encoder_base_modules(self, return_names: bool = False):
-        if self._parametrized:
+        if self.parametrized:
             check_fn = lambda m: hasattr(m, "parametrizations")
         else:
             check_fn = lambda m: len(m._parameters)>0
@@ -215,16 +227,16 @@ class BasePruningModel(BaseModel):
 
 
     @torch.no_grad()
-    def _count_non_zero_params(self, idx: int = 0) -> Tuple[int, int, int]:
-        assert self._parametrized, "Function only implemented for diff pruning"
+    def _count_non_zero_params(self, idx: Optional[int] = None) -> Tuple[int, int, int]:
+        assert self.parametrized, "Function only implemented for diff pruning"
 
         l = [self._count_non_zero_params_for_module(m, idx) for m in self.get_encoder_base_modules()]
         return [sum(x) for x in list(zip(*l))]
 
 
     @torch.no_grad()
-    def _count_non_zero_params_per_layer(self, idx: int = 0) -> Dict[int, Tuple[int, int, int]]:
-        assert self._parametrized, "Function only implemented for diff pruning"
+    def _count_non_zero_params_per_layer(self, idx: Optional[int] = None) -> Dict[int, Tuple[int, int, int]]:
+        assert self.parametrized, "Function only implemented for diff pruning"
 
         t = torch.zeros((self.total_layers, 3), dtype=int)
         for module_name, base_module in self.get_encoder_base_modules(return_names=True):
@@ -235,25 +247,30 @@ class BasePruningModel(BaseModel):
 
 
     @torch.no_grad()
-    def _count_non_zero_params_for_module(self, m: torch.nn.Module, idx: int = 0) -> Tuple[int, int, int]:
+    def _count_non_zero_params_for_module(self, m: torch.nn.Module, idx: Optional[int] = None) -> Tuple[int, int, int]:
+        
+        def count_fn(par):
+            if isinstance(par, DiffWeightFixmask):
+                n_p = par.mask.numel()
+                n_p_zero = (~par_list[idx].mask).sum()
+                n_p_one = (n_p_ - n_p_zero_)
+            else:
+                z = par.z.detach()
+                n_p = z.numel()
+                n_p_zero = (z == 0.).sum()
+                n_p_one = (z == 1.).sum()
+            return torch.tensor([n_p, n_p_zero, n_p_one])
+
         assert hasattr(m, "parametrizations"), "module has no parametrizations"
-        n_p = 0
-        n_p_zero = 0
-        n_p_one = 0
+        p_counts = torch.zeros((3,), dtype=int)
         with self.deterministic():
             for n, par_list in list(m.parametrizations.items()):
-                if isinstance(par_list[idx], DiffWeightFixmask):
-                    n_p_ = par_list[idx].mask.numel()
-                    n_p_zero_ = (~par_list[idx].mask).sum().item()
-                    n_p += n_p_
-                    n_p_zero += n_p_zero_
-                    n_p_one += (n_p_ - n_p_zero_)
+                if idx is None:
+                    for par in par_list:
+                        p_counts += count_fn(par)
                 else:
-                    z = par_list[idx].z.detach()
-                    n_p += z.numel()
-                    n_p_zero += (z == 0.).sum().item()
-                    n_p_one += (z == 1.).sum().item()
-        return n_p, n_p_zero, n_p_one
+                    p_counts += count_fn(par_list[idx])                                   
+        return p_counts.tolist()
 
 
     def _remove_parametrizations(self) -> None:
@@ -267,8 +284,19 @@ class BasePruningModel(BaseModel):
         self.model_state = ModelState.INIT
 
 
+    def _remove_parametrization(self) -> None:
+        self._freeze_parametrizations(True)
+        for module in self.get_encoder_base_modules():
+            try:
+                for n in list(module.parametrizations):
+                    parametrize.remove_parametrizations(module, n)
+            except AttributeError:
+                pass
+        self.model_state = ModelState.INIT    
+
+
     def _add_diff_parametrizations(self, n_parametrizations: int = 1, p_requires_grad: bool = False, fixmask_init: bool = False, **kwargs) -> None:
-        assert not self._parametrized, "cannot add diff parametrizations because of existing parametrizations in the model"
+        assert not self.parametrized, "cannot add diff parametrizations because of existing parametrizations in the model"
         for base_module in self.get_encoder_base_modules(): 
             for n,p in list(base_module.named_parameters()):
                 p.requires_grad = p_requires_grad
@@ -314,8 +342,14 @@ class BasePruningModel(BaseModel):
                 pass
 
 
+    def _freeze_original_parameters(self, frozen: bool):
+        for base_module in self.get_encoder_base_modules():
+            for par_list in base_module.parametrizations.values():
+                par_list.original.requires_grad = not frozen
+
+
     @torch.no_grad()
-    def _finetune_to_fixmask(self, pct: Optional[float] = None, n_parametrizations: int = 1) -> None:
+    def _finetune_to_fixmask(self, pct: Optional[float] = None, n_parametrizations: int = 1, merged_cutoff: bool = False) -> None:
 
         def _get_cutoff(values, pct):
             k = int(len(values) * pct)
@@ -327,18 +361,19 @@ class BasePruningModel(BaseModel):
 
             if pct is not None:
 
-                diff_weights = [torch.tensor([])] * n_parametrizations
+                diff_weights = [torch.tensor([])] * (1 + (not merged_cutoff) * (n_parametrizations - 1))
                 for base_module in self.get_encoder_base_modules():
                     for n, par_list in list(base_module.parametrizations.items()):
                         w = par_list.original.detach()
                         for idx in range(n_parametrizations):
                             diff_weight = par_list[idx].diff_weight(w)
-                            diff_weights[idx] = torch.cat([diff_weights[idx], diff_weight.flatten().cpu()])
+                            i = 0 if merged_cutoff else idx
+                            diff_weights[i] = torch.cat([diff_weights[i], diff_weight.flatten().cpu()])
                             w = diff_weight + w
 
                 cutoffs = []
-                for idx in range(n_parametrizations):
-                    cutoffs.append(_get_cutoff(diff_weights[idx], pct))
+                for diff_weight in diff_weights:
+                    cutoffs.append(_get_cutoff(diff_weight, pct))
 
             for base_module in self.get_encoder_base_modules():
                 for n, par_list in list(base_module.parametrizations.items()):
@@ -347,7 +382,8 @@ class BasePruningModel(BaseModel):
                     for idx in range(n_parametrizations):
                         diff_weight = par_list[idx].diff_weight(w)
                         if pct is not None:
-                            diff_mask = (torch.abs(diff_weight) > cutoffs[idx])
+                            i = 0 if merged_cutoff else idx
+                            diff_mask = (torch.abs(diff_weight) > cutoffs[i])
                         else:
                             diff_mask = ~torch.isclose(diff_weight, torch.tensor(0.), rtol=1e-8)
                         diff_weights.append((diff_weight, diff_mask))

@@ -5,19 +5,17 @@ from pathlib import Path
 import torch
 from torch.utils.data import DataLoader
 from torch.optim import AdamW
-import torch.nn.utils.parametrize as parametrize
 from transformers import get_linear_schedule_with_warmup
 
-from typing import Union, Callable, Dict, Optional, List, Tuple
+from typing import Union, Callable, Dict, Optional
 
 from src.models.model_heads import ClfHead, AdvHead
 from src.models.model_base import BasePruningModel, ModelState
-from src.models.weight_parametrizations import DoubleDiffWeightFinetune, DiffWeightFixmask
 from src.training_logger import TrainLogger
 from src.utils import dict_to_device
 
 
-class DoubleDiffModel(BasePruningModel):
+class ModularDiffModel(BasePruningModel):
 
     def __init__(
         self,
@@ -116,6 +114,8 @@ class DoubleDiffModel(BasePruningModel):
 
         self._init_sparsity_pen(sparsity_pen)
         self._add_diff_parametrizations(
+            n_parametrizations = 2,
+            p_requires_grad = False,
             alpha_init = alpha_init,
             concrete_lower = concrete_lower,
             concrete_upper = concrete_upper,
@@ -145,7 +145,7 @@ class DoubleDiffModel(BasePruningModel):
 
             # switch to fixed mask training
             if epoch == num_epochs_finetune:
-                self._finetune_to_fixmask(fixmask_pct)
+                self._finetune_to_fixmask(fixmask_pct, n_parametrizations = 2)
                 self._init_optimizer_and_schedule(
                     train_steps_fixmask,
                     learning_rate,
@@ -195,9 +195,10 @@ class DoubleDiffModel(BasePruningModel):
             logger.validation_loss(epoch, result_protected, suffix="protected")
 
             # count non zero
-            n_p, n_p_zero, n_p_between = self._count_non_zero_params()
             for i, suffix in enumerate(["task", "adv"]):
-                logger.non_zero_params(epoch, n_p[i], n_p_zero[i], n_p_between[i], suffix)
+                n_p, n_p_zero, n_p_one = self._count_non_zero_params(i)
+                n_p_between = n_p - (n_p_zero + n_p_one)
+                logger.non_zero_params(epoch, n_p, n_p_zero, n_p_between, suffix)
 
             result_str = ", " + ", ".join([
                 str_suffix(result, "_task"),
@@ -245,9 +246,9 @@ class DoubleDiffModel(BasePruningModel):
             forward_fn = lambda x: self(**x)
 
         if debiased != self._debiased:
-            self.set_debiased(debiased)
+            self.set_debiased(debiased, grad_switch=False)
             result = self._evaluate(val_loader, forward_fn, loss_fn, pred_fn, metrics, label_idx, desc)
-            self.set_debiased(not debiased)
+            self.set_debiased((not debiased), grad_switch=False)
         else:
             result = self._evaluate(val_loader, forward_fn, loss_fn, pred_fn, metrics, label_idx, desc)
 
@@ -283,7 +284,7 @@ class DoubleDiffModel(BasePruningModel):
             loss_task = loss.item()
 
             if self.model_state == ModelState.FINETUNING:
-                loss_l0 = self._get_sparsity_pen(log_ratio)
+                loss_l0 = self._get_sparsity_pen(log_ratio, 0)
                 loss += loss_l0
             else:
                 loss_l0 = torch.tensor(0.)
@@ -312,7 +313,7 @@ class DoubleDiffModel(BasePruningModel):
             loss += loss_protected
 
             if self.model_state == ModelState.FINETUNING:
-                loss_l0_adv = self._get_sparsity_pen(log_ratio)
+                loss_l0_adv = self._get_sparsity_pen(log_ratio, 1)
                 loss += loss_l0_adv
             else:
                 loss_l0_adv = torch.tensor(0.)
@@ -343,22 +344,17 @@ class DoubleDiffModel(BasePruningModel):
             self.global_step += 1
 
 
-    def set_debiased(self, debiased: bool) -> None:
+    def set_debiased(self, debiased: bool, grad_switch: bool = True) -> None:
         if debiased:
             self.bottleneck = self.bottleneck_debiased
             self.task_head = self.task_head_debiased
+            self._activate_parametrizations(True, 1)
+            if grad_switch: self._freeze_parametrizations(True, 0)
         else:
             self.bottleneck = self.bottleneck_biased
             self.task_head = self.task_head_biased
-
-        if self.model_state == ModelState.FIXMASK:
-            self._activate_parametrizations(debiased, 1)
-            self._freeze_parametrizations(debiased, 0)
-        elif self.model_state == ModelState.FINETUNING:
-            for base_module in self.get_encoder_base_modules():
-                for par_list in base_module.parametrizations.values():
-                    par_list[0].set_weight_state(first = not debiased)
-
+            self._activate_parametrizations(False, 1)
+            if grad_switch: self._freeze_parametrizations(False, 0)
         self._debiased = debiased
 
 
@@ -374,9 +370,7 @@ class DoubleDiffModel(BasePruningModel):
         num_warmup_steps: int = 0
     ) -> None:
 
-        optimizer_param_groups = self._get_diff_param_groups(learning_rate, weight_decay, learning_rate_alpha)
-
-        optimizer_param_groups.extend([
+        optimizer_param_groups = [
             {
                 "params": self.bottleneck_biased.parameters(),
                 "lr": learning_rate_bottleneck
@@ -397,7 +391,12 @@ class DoubleDiffModel(BasePruningModel):
                 "params": self.adv_head.parameters(),
                 "lr": learning_rate_adv_head
             }
-        ])
+        ]
+
+        diff_param_groups_task = self._get_diff_param_groups(learning_rate, weight_decay, learning_rate_alpha, 0)
+        diff_param_groups_protected = self._get_diff_param_groups(learning_rate, weight_decay, learning_rate_alpha, 1)
+        optimizer_param_groups.extend(diff_param_groups_task)
+        optimizer_param_groups.extend(diff_param_groups_protected)
 
         self.optimizer = AdamW(optimizer_param_groups, betas=(0.9, 0.999), eps=1e-08)
 
@@ -440,7 +439,7 @@ class DoubleDiffModel(BasePruningModel):
         output_dir = Path(output_dir)
         output_dir.mkdir(parents=True, exist_ok=True)
         suffix = f"fixmask{self.fixmask_pct}" if self.model_state == ModelState.FIXMASK else "diff_pruning"
-        filename = f"{self.model_name.split('/')[-1]}-{suffix}-doublediff.pt"
+        filename = f"{self.model_name.split('/')[-1]}-{suffix}-modular.pt"
         filepath = output_dir / filename
         torch.save(info_dict, filepath)
         return filepath
@@ -470,6 +469,8 @@ class DoubleDiffModel(BasePruningModel):
         )
 
         cls_instance._add_diff_parametrizations(
+            n_parametrizations = 2,
+            p_requires_grad = False,
             fixmask_init = (info_dict["model_state"] == ModelState.FIXMASK),
             alpha_init = 5, # standard value for alpha init, not important here as it will be overwritten by checkpoint
             concrete_lower = info_dict['concrete_lower'],
@@ -493,105 +494,3 @@ class DoubleDiffModel(BasePruningModel):
 
         return cls_instance
 
-
-    @torch.no_grad()
-    def _count_non_zero_params(self) -> Tuple[int, int]:
-        assert self.parametrized, "Function only implemented for diff pruning"
-
-        n_p = [0, 0]
-        n_p_zero = [0, 0]
-        n_p_one = [0, 0]
-        with self.deterministic():
-            for base_module in self.get_encoder_base_modules():
-                for n, par_list in list(base_module.parametrizations.items()):
-                    if isinstance(par_list[0], DiffWeightFixmask):
-                        for idx, par in enumerate(par_list):
-                            n_p_ = par_list[idx].mask.numel()
-                            n_p_zero_ = (~par_list[idx].mask).sum().item()
-                            n_p[idx] += n_p_
-                            n_p_zero[idx] += n_p_zero_
-                            n_p_one[idx] += (n_p_ - n_p_zero_)
-                    else:
-                        z_masks = par_list[0].get_z_masks()
-                        for idx, z in enumerate(z_masks):
-                            n_p[idx] += z.numel()
-                            n_p_zero[idx] += (z == 0.).sum().item()
-                            n_p_one[idx] += (z == 1.).sum().item()
-
-        n_p_between = [n_p_ - (n_p_zero_ + n_p_one_) for n_p_, n_p_zero_, n_p_one_ in zip(n_p, n_p_zero, n_p_one)]
-        return n_p, n_p_zero, n_p_between
-
-
-    def _add_diff_parametrizations(self, fixmask_init: bool = False, **kwargs) -> None:
-        assert not self.parametrized, "cannot add diff parametrizations because of existing parametrizations in the model"
-        for base_module in self.get_encoder_base_modules(): 
-            for n,p in list(base_module.named_parameters()):
-                p.requires_grad = False
-                if fixmask_init:
-                    for _ in range(2):
-                        # in case of fixmask init, can only initalize with dummy values
-                        parametrize.register_parametrization(base_module, n, DiffWeightFixmask(
-                            torch.zeros_like(p), torch.ones_like(p, dtype=bool)
-                        ))
-                else:
-                    parametrize.register_parametrization(base_module, n, DoubleDiffWeightFinetune(p, **kwargs))
-        if fixmask_init:
-            self.model_state = ModelState.FIXMASK
-        else:
-            self.model_state = ModelState.FINETUNING
-
-
-    @torch.no_grad()
-    def _finetune_to_fixmask(self, pct: Optional[List[float]] = None) -> None:
-
-        def _get_cutoff(values, pct):
-            k = int(len(values) * pct)
-            return torch.topk(torch.abs(values), k, largest=True, sorted=True)[0][-1]
-
-        assert self.model_state == ModelState.FINETUNING, "model needs to be in finetuning state"
-
-        with self.deterministic():
-
-            if pct is not None:
-
-                diff_weights = [torch.tensor([])] * 2
-                for base_module in self.get_encoder_base_modules():
-                    for n, par_list in list(base_module.parametrizations.items()):
-                        X = par_list.original
-                        diff_weights_ = par_list[0].get_diff_weights(X)
-                        for idx in range(2):
-                            diff_weights[idx] = torch.cat([diff_weights[idx], diff_weights_[idx].flatten().cpu()])
-
-                cutoffs = [_get_cutoff(diff_weights[idx], pct) for idx in range(2)]
-
-            for base_module in self.get_encoder_base_modules():
-                for n, par_list in list(base_module.parametrizations.items()):
-                    X = par_list.original
-                    diff_weights = par_list[0].get_diff_weights(X)
-                    if pct is not None:
-                        diff_masks = [(torch.abs(diff_weights[idx]) > cutoffs[idx]) for idx in range(2)]
-                    else:
-                        diff_masks = [~torch.isclose(diff_weight, torch.tensor(0.), rtol=1e-8) for diff_weight in diff_weights]
-                    parametrize.remove_parametrizations(base_module, n, leave_parametrized=False)
-                    for diff_weight, diff_mask in zip(diff_weights, diff_masks):
-                        parametrize.register_parametrization(base_module, n, DiffWeightFixmask(diff_weight, diff_mask))
-
-        self.model_state = ModelState.FIXMASK
-        self.fixmask_pct = pct
-
-
-    def _get_sparsity_pen(self, log_ratio: float) -> torch.Tensor:
-        assert self.model_state == ModelState.FINETUNING, "model needs to be in finetuning state"
-        l0_pen = 0.
-        for module_name, base_module in self.get_encoder_base_modules(return_names=True):
-            layer_idx = self.get_layer_idx_from_module(module_name)
-            sparsity_pen = self.sparsity_pen[layer_idx]
-            module_pen = 0.
-            for par_list in list(base_module.parametrizations.values()):
-                alpha_weights = par_list[0].diff_weight_1.alpha_weights
-                if self._debiased:
-                    alpha_weights.extend(par_list[0].diff_weight_2.alpha_weights)
-                for a in alpha_weights:
-                    module_pen += self.get_l0_norm_term(a, log_ratio)
-            l0_pen += (module_pen * sparsity_pen)
-        return l0_pen

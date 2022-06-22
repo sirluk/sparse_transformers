@@ -10,7 +10,7 @@ from transformers import get_linear_schedule_with_warmup
 from typing import Union, Callable, Dict, Optional
 
 from src.models.model_heads import ClfHead, AdvHead
-from src.models.model_base import BasePruningModel, ModelState
+from src.models.model_base import BasePruningModel
 from src.training_logger import TrainLogger
 from src.utils import dict_to_device
 
@@ -60,6 +60,7 @@ class ModularDiffModel(BasePruningModel):
         self.task_head_debiased = ClfHead([self.in_size_heads]*(task_n_hidden+1), num_labels_task, dropout=task_dropout)
         self.adv_head = AdvHead(adv_count, hid_sizes=[self.in_size_heads]*(adv_n_hidden+1), num_labels=num_labels_protected, dropout=adv_dropout)
 
+        self.sparse_task = True
         self.set_debiased(False)
 
     def _forward(self, **x) -> torch.Tensor:
@@ -101,8 +102,12 @@ class ModularDiffModel(BasePruningModel):
         weight_decay: float,
         max_grad_norm: float,
         output_dir: Union[str, os.PathLike],
-        fixmask_pct: Optional[float] = None
+        fixmask_pct: Optional[float] = None,
+        sparse_task: bool = True,
+        merged_cutoff: bool = False
     ) -> None:
+
+        self.sparse_task = sparse_task
 
         self.global_step = 0
         num_epochs_finetune += num_epochs_warmup
@@ -113,14 +118,19 @@ class ModularDiffModel(BasePruningModel):
         log_ratio = self.get_log_ratio(concrete_lower, concrete_upper)
 
         self._init_sparsity_pen(sparsity_pen)
-        self._add_diff_parametrizations(
-            n_parametrizations = 2,
-            p_requires_grad = False,
-            alpha_init = alpha_init,
-            concrete_lower = concrete_lower,
-            concrete_upper = concrete_upper,
-            structured = structured_diff_pruning
-        )
+
+        if not self.parametrized:
+            self._add_diff_parametrizations(
+                n_parametrizations = 1 + sparse_task,
+                p_requires_grad = not sparse_task,
+                alpha_init = alpha_init,
+                concrete_lower = concrete_lower,
+                concrete_upper = concrete_upper,
+                structured = structured_diff_pruning
+            )
+        else:
+            assert self.n_parametrizations == 1 + sparse_task, f"model has been trained with sparse_task={sparse_task}"
+            assert self.finetune_state or (self.fixmask_state and num_epochs_finetune==0), "model is in fixmask state but num_epochs_fintune>0"
 
         self._init_optimizer_and_schedule(
             train_steps_finetune,
@@ -145,7 +155,7 @@ class ModularDiffModel(BasePruningModel):
 
             # switch to fixed mask training
             if epoch == num_epochs_finetune:
-                self._finetune_to_fixmask(fixmask_pct, n_parametrizations = 2)
+                self._finetune_to_fixmask(fixmask_pct, n_parametrizations = (1 + sparse_task), merged_cutoff)
                 self._init_optimizer_and_schedule(
                     train_steps_fixmask,
                     learning_rate,
@@ -195,7 +205,8 @@ class ModularDiffModel(BasePruningModel):
             logger.validation_loss(epoch, result_protected, suffix="protected")
 
             # count non zero
-            for i, suffix in enumerate(["task", "adv"]):
+            mask_names = ["task", "adv"]
+            for i, suffix in enumerate(mask_names[not sparse_task:]):
                 n_p, n_p_zero, n_p_one = self._count_non_zero_params(i)
                 n_p_between = n_p - (n_p_zero + n_p_one)
                 logger.non_zero_params(epoch, n_p, n_p_zero, n_p_between, suffix)
@@ -209,7 +220,7 @@ class ModularDiffModel(BasePruningModel):
                 train_str.format(epoch, self.model_state, result_str), refresh=True
             )
 
-            if ((num_epochs_fixmask > 0) and (self.model_state==ModelState.FIXMASK)) or ((num_epochs_fixmask == 0) and (epoch >= num_epochs_warmup)):
+            if ((num_epochs_fixmask > 0) and self.fixmask_state) or ((num_epochs_fixmask == 0) and (epoch >= num_epochs_warmup)):
                 cpt = self.save_checkpoint(
                     Path(output_dir),
                     concrete_lower,
@@ -283,7 +294,7 @@ class ModularDiffModel(BasePruningModel):
             loss = loss_fn(outputs, labels_task.to(self.device))
             loss_task = loss.item()
 
-            if self.model_state == ModelState.FINETUNING:
+            if self.finetune_state and self.sparse_task:
                 loss_l0 = self._get_sparsity_pen(log_ratio, 0)
                 loss += loss_l0
             else:
@@ -312,8 +323,8 @@ class ModularDiffModel(BasePruningModel):
             loss_protected = self._get_mean_loss(outputs_protected, labels_protected.to(self.device), loss_fn_protected)
             loss += loss_protected
 
-            if self.model_state == ModelState.FINETUNING:
-                loss_l0_adv = self._get_sparsity_pen(log_ratio, 1)
+            if self.finetune_state:
+                loss_l0_adv = self._get_sparsity_pen(log_ratio, int(self.sparse_task))
                 loss += loss_l0_adv
             else:
                 loss_l0_adv = torch.tensor(0.)
@@ -345,16 +356,18 @@ class ModularDiffModel(BasePruningModel):
 
 
     def set_debiased(self, debiased: bool, grad_switch: bool = True) -> None:
+        self._activate_parametrizations(debiased, int(self.sparse_task))
         if debiased:
             self.bottleneck = self.bottleneck_debiased
             self.task_head = self.task_head_debiased
-            self._activate_parametrizations(True, 1)
-            if grad_switch: self._freeze_parametrizations(True, 0)
         else:
             self.bottleneck = self.bottleneck_biased
             self.task_head = self.task_head_biased
-            self._activate_parametrizations(False, 1)
-            if grad_switch: self._freeze_parametrizations(False, 0)
+        if grad_switch:
+            if self.sparse_task:
+                self._freeze_parametrizations(debiased, 0)
+            else:
+                self._freeze_original_parameters(debiased)
         self._debiased = debiased
 
 
@@ -393,10 +406,18 @@ class ModularDiffModel(BasePruningModel):
             }
         ]
 
-        diff_param_groups_task = self._get_diff_param_groups(learning_rate, weight_decay, learning_rate_alpha, 0)
-        diff_param_groups_protected = self._get_diff_param_groups(learning_rate, weight_decay, learning_rate_alpha, 1)
-        optimizer_param_groups.extend(diff_param_groups_task)
-        optimizer_param_groups.extend(diff_param_groups_protected)
+        optimizer_param_groups.extend(
+            self._get_diff_param_groups(learning_rate, weight_decay, learning_rate_alpha)
+        )
+
+        if not self.sparse_task:
+            optimizer_param_groups.append(
+                {
+                    "params": [p for n,p in self.encoder.named_parameters() if n[-9:] == f".original"],
+                    "lr": learning_rate,
+                    "weight_decay": weight_decay
+                }                
+            )
 
         self.optimizer = AdamW(optimizer_param_groups, betas=(0.9, 0.999), eps=1e-08)
 
@@ -424,7 +445,7 @@ class ModularDiffModel(BasePruningModel):
             "bottleneck": self.has_bottleneck,
             "bottleneck_dim": self.bottleneck_dim,
             "bottleneck_dropout": self.bottleneck_dropout,
-            "model_state": self.model_state,
+            "fixmask": self.fixmask_state,
             "encoder_state_dict": self.encoder_module.state_dict(),
             "bottleneck_biased_state_dict": self.bottleneck_biased.state_dict(),
             "bottleneck_debiased_state_dict": self.bottleneck_debiased.state_dict(),
@@ -433,13 +454,14 @@ class ModularDiffModel(BasePruningModel):
             "adv_head_state_dict": self.adv_head.state_dict(),
             "concrete_lower": concrete_lower,
             "concrete_upper": concrete_upper,
-            "structured_diff_pruning": structured_diff_pruning
+            "structured_diff_pruning": structured_diff_pruning,
+            "sparse_task": self.sparse_task
         }
 
         output_dir = Path(output_dir)
         output_dir.mkdir(parents=True, exist_ok=True)
-        suffix = f"fixmask{self.fixmask_pct}" if self.model_state == ModelState.FIXMASK else "diff_pruning"
-        filename = f"{self.model_name.split('/')[-1]}-{suffix}-modular.pt"
+        suffix = f"fixmask{self.fixmask_pct}" if self.fixmask_state else "diff_pruning"
+        filename = f"{self.model_name.split('/')[-1]}-{suffix}-modular{'-sparse_task' if self.sparse_task else ''}.pt"
         filepath = output_dir / filename
         torch.save(info_dict, filepath)
         return filepath
@@ -469,9 +491,9 @@ class ModularDiffModel(BasePruningModel):
         )
 
         cls_instance._add_diff_parametrizations(
-            n_parametrizations = 2,
-            p_requires_grad = False,
-            fixmask_init = (info_dict["model_state"] == ModelState.FIXMASK),
+            n_parametrizations = 1 + info_dict["sparse_task"],
+            p_requires_grad = not info_dict["sparse_task"],
+            fixmask_init = info_dict["fixmask"],
             alpha_init = 5, # standard value for alpha init, not important here as it will be overwritten by checkpoint
             concrete_lower = info_dict['concrete_lower'],
             concrete_upper = info_dict['concrete_upper'],
