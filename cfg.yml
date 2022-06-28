@@ -52,9 +52,12 @@ train_config_diff_pruning:
     optimizer_warmup_steps: 0
     sparsity_pen: 1.25e-7
     max_grad_norm: 1.0
-    fixmask_pct: 0.1
+    fixmask_pct: 0.025
     logging_step: 5
     cooldown: 5
+    sparse_task: True
+    merged_cutoff: False
+    merged_min_pct: 0.01
 train_config_baseline:
     bottleneck: False
     num_epochs_warmup: 0

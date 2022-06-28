@@ -103,9 +103,10 @@ class ModularDiffModel(BasePruningModel):
         weight_decay: float,
         max_grad_norm: float,
         output_dir: Union[str, os.PathLike],
-        fixmask_pct: Optional[float] = None,
-        sparse_task: bool = True,
-        merged_cutoff: bool = False
+        sparse_task: bool,
+        merged_cutoff: bool,
+        merged_min_pct: float,
+        fixmask_pct: Optional[float] = None
     ) -> None:
 
         self.sparse_task = sparse_task
@@ -159,7 +160,8 @@ class ModularDiffModel(BasePruningModel):
                 self._finetune_to_fixmask(
                     fixmask_pct,
                     n_parametrizations = (1 + sparse_task),
-                    merged_cutoff = merged_cutoff
+                    merged_cutoff = merged_cutoff,
+                    merged_min_pct = merged_min_pct
                 )
                 self._init_optimizer_and_schedule(
                     train_steps_fixmask,
