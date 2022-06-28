@@ -114,25 +114,6 @@ class BaseModel(torch.nn.Module):
             losses.append(loss_fn(output, labels))
         return torch.stack(losses).mean()        
 
-    def forward(self, **x) -> torch.Tensor:
-        raise NotImplementedError
-
-    def evaluate(self, *args, **kwargs):
-        raise NotImplementedError
-
-    def _step(self, *args, **kwargs):
-        raise NotImplementedError
-
-    def _init_optimizer_and_schedule(self, *args, **kwargs):
-        raise NotImplementedError
-
-    def save_checkpoint(self, output_dir: Union[str, os.PathLike], *args, **kwargs) -> None:
-        raise NotImplementedError
-
-    @classmethod
-    def load_checkpoint(cls, filepath: Union[str, os.PathLike], *args, **kwargs) -> torch.nn.Module:
-        raise NotImplementedError
-
     def to(self, device: Union[list, Union[str, torch.device]], *args, **kwargs) -> None:
         if isinstance(device, list):
             asssert_fn = lambda x: x=="cuda" if isinstance(x, str) else x.type=="cuda"
@@ -155,6 +136,25 @@ class BaseModel(torch.nn.Module):
     def _remove_parallel(self) -> None:
         if isinstance(self.encoder, torch.nn.DataParallel):
             self.encoder = self.encoder.module
+
+    def forward(self, **x) -> torch.Tensor:
+        raise NotImplementedError
+
+    def evaluate(self, *args, **kwargs):
+        raise NotImplementedError
+
+    def _step(self, *args, **kwargs):
+        raise NotImplementedError
+
+    def _init_optimizer_and_schedule(self, *args, **kwargs):
+        raise NotImplementedError
+
+    def save_checkpoint(self, output_dir: Union[str, os.PathLike], *args, **kwargs) -> None:
+        raise NotImplementedError
+
+    @classmethod
+    def load_checkpoint(cls, filepath: Union[str, os.PathLike], *args, **kwargs) -> torch.nn.Module:
+        raise NotImplementedError
 
 
 class BasePruningModel(BaseModel):
@@ -252,7 +252,7 @@ class BasePruningModel(BaseModel):
         def count_fn(par):
             if isinstance(par, DiffWeightFixmask):
                 n_p = par.mask.numel()
-                n_p_zero = (~par_list[idx].mask).sum()
+                n_p_zero = (~par.mask).sum()
                 n_p_one = (n_p - n_p_zero)
             else:
                 z = par.z.detach()
@@ -271,17 +271,6 @@ class BasePruningModel(BaseModel):
                 else:
                     p_counts += count_fn(par_list[idx])                                   
         return p_counts.tolist()
-
-
-    def _remove_parametrizations(self) -> None:
-        self._freeze_parametrizations(True)
-        for module in self.get_encoder_base_modules():
-            try:
-                for n in list(module.parametrizations):
-                    parametrize.remove_parametrizations(module, n)
-            except AttributeError:
-                pass
-        self.model_state = ModelState.INIT
 
 
     def _remove_parametrization(self) -> None:
@@ -349,11 +338,12 @@ class BasePruningModel(BaseModel):
 
 
     @torch.no_grad()
-    def _finetune_to_fixmask(self, pct: Optional[float] = None, n_parametrizations: int = 1, merged_cutoff: bool = False) -> None:
+    def _finetune_to_fixmask(self, pct: Optional[float] = None, n_parametrizations: int = 1, merged_cutoff: bool = False, merged_min_pct: float = 0.01) -> None:
 
-        def _get_cutoff(values, pct):
-            k = int(len(values) * pct)
-            return torch.topk(torch.abs(values), k, largest=True, sorted=True)[0][-1]
+        def _get_cutoff(values, pct, abs = True):
+            k = math.ceil(len(values) * pct)
+            if abs: values = torch.abs(values)
+            return torch.topk(values, k, largest=True, sorted=True)[0][-1]
 
         assert self.model_state == ModelState.FINETUNING, "model needs to be in finetuning state"
 
@@ -361,19 +351,26 @@ class BasePruningModel(BaseModel):
 
             if pct is not None:
 
-                diff_weights = [torch.tensor([])] * (1 + (not merged_cutoff) * (n_parametrizations - 1))
+                diff_weights_abs = [torch.tensor([])] * n_parametrizations
                 for base_module in self.get_encoder_base_modules():
                     for n, par_list in list(base_module.parametrizations.items()):
                         w = par_list.original.detach()
                         for idx in range(n_parametrizations):
                             diff_weight = par_list[idx].diff_weight(w)
-                            i = 0 if merged_cutoff else idx
-                            diff_weights[i] = torch.cat([diff_weights[i], diff_weight.flatten().cpu()])
+                            diff_weights_abs[idx] = torch.cat([diff_weights_abs[idx], torch.abs(diff_weight.flatten().cpu())])
                             w = diff_weight + w
 
-                cutoffs = []
-                for diff_weight in diff_weights:
-                    cutoffs.append(_get_cutoff(diff_weight, pct))
+                if merged_cutoff and (n_parametrizations > 1):
+                    min_cutoffs = [_get_cutoff(x, merged_min_pct, abs=False) for x in diff_weights_abs]
+                    if merged_min_pct >= pct:
+                        print(f"merged_min_pct >= pct, using target sparsity merged_min_pct={merged_min_pct}")
+                        cutoffs = min_cutoffs
+                    else:
+                        remaining = torch.cat([x[x<c] for x,c in zip(diff_weights_abs, min_cutoffs)])
+                        remaining_cutoff = _get_cutoff(remaining, pct - merged_min_pct)
+                        cutoffs = [min(remaining_cutoff, c) for c in min_cutoffs]          
+                else:
+                    cutoffs = [_get_cutoff(x, pct, abs=False) for x in diff_weights_abs]
 
             for base_module in self.get_encoder_base_modules():
                 for n, par_list in list(base_module.parametrizations.items()):
@@ -383,7 +380,7 @@ class BasePruningModel(BaseModel):
                         diff_weight = par_list[idx].diff_weight(w)
                         if pct is not None:
                             i = 0 if merged_cutoff else idx
-                            diff_mask = (torch.abs(diff_weight) > cutoffs[i])
+                            diff_mask = (torch.abs(diff_weight) >= cutoffs[i])
                         else:
                             diff_mask = ~torch.isclose(diff_weight, torch.tensor(0.), rtol=1e-8)
                         diff_weights.append((diff_weight, diff_mask))
@@ -433,7 +430,7 @@ class BasePruningModel(BaseModel):
 
 
     def _get_sparsity_pen(self, log_ratio: float, idx: int) -> torch.Tensor:
-        assert self.model_state == ModelState.FINETUNING, "model needs to be in finetuning state"
+        assert self.finetune_state, "model needs to be in finetuning state"
         l0_pen = 0.
         for module_name, base_module in self.get_encoder_base_modules(return_names=True):
             layer_idx = self.get_layer_idx_from_module(module_name)

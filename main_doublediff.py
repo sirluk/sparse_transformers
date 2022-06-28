@@ -11,7 +11,6 @@ from src.utils import (
     set_num_epochs_debug,
     set_dir_debug,
     get_data,
-    get_logger,
     get_callables
 )
 
@@ -51,6 +50,7 @@ def train_doublediff_pruning(device, train_loader, val_loader, num_labels, num_l
         num_epochs_finetune = args_train.num_epochs_finetune,
         num_epochs_fixmask = args_train.num_epochs_fixmask,
         alpha_init = args_train.alpha_init,
+        concrete_samples = args_train.concrete_samples,
         concrete_lower = args_train.concrete_lower,
         concrete_upper = args_train.concrete_upper,
         structured_diff_pruning = args_train.structured_diff_pruning,
@@ -79,6 +79,7 @@ def main():
     parser.add_argument("--run_adv_attack", type=bool, default=True, help="Set to false if you do not want to run adverserial attack after training")
     parser.add_argument("--gpu_id", nargs="*", type=int, default=[0], help="")
     parser.add_argument("--seed", type=int, default=0, help="torch random seed")
+    parser.add_argument("--ds", type=str, default="bios", help="dataset")
     base_args = parser.parse_args()
 
     torch.manual_seed(base_args.seed)
@@ -86,8 +87,8 @@ def main():
 
     with open("cfg.yml", "r") as f:
         cfg = yaml.safe_load(f)
-
-    args_train = argparse.Namespace(**cfg["train_config_diff_pruning"], **cfg["data_config"], **cfg["model_config"])
+    data_cfg = f"data_config_{base_args.ds}"
+    args_train = argparse.Namespace(**cfg["train_config_diff_pruning"], **cfg[data_cfg], **cfg["model_config"])
     args_attack = argparse.Namespace(**cfg["adv_attack"])
 
     if base_args.debug:
@@ -97,7 +98,7 @@ def main():
 
     device = get_device(base_args.gpu_id)
 
-    train_loader, val_loader, num_labels, num_labels_protected = get_data(args_train, debug=base_args.debug)
+    train_loader, val_loader, num_labels, num_labels_protected = get_data(args_train, ds=base_args.ds, debug=base_args.debug)
 
     log_dir = Path(args_train.log_dir)
     log_dir.mkdir(parents=True, exist_ok=True)
@@ -134,7 +135,8 @@ def main():
             adv_count = args_attack.adv_count,
             adv_dropout = args_attack.adv_dropout,
             num_epochs = args_attack.num_epochs,
-            lr = args_attack.learning_rate
+            lr = args_attack.learning_rate,
+            cooldown = args_attack.cooldown
         )
 
 

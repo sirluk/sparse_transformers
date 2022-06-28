@@ -28,6 +28,7 @@ def main():
     parser.add_argument("--debug", type=bool, default=False, help="Whether to run on small subset for testing")
     parser.add_argument("--gpu_id", nargs="*", type=int, default=[0], help="")
     parser.add_argument("--seed", type=int, default=0, help="torch random seed")
+    parser.add_argument("--ds", type=str, default="bios", help="dataset")
     base_args = parser.parse_args()
 
     torch.manual_seed(base_args.seed)
@@ -37,18 +38,19 @@ def main():
 
     with open("cfg.yml", "r") as f:
         cfg = yaml.safe_load(f)
-    args_train = argparse.Namespace(**cfg["adv_attack"], **cfg["data_config"], **cfg["model_config"])
+    data_cfg = f"data_config_{base_args.ds}"
+    args_train = argparse.Namespace(**cfg["adv_attack"], **cfg[data_cfg], **cfg["model_config"])
 
     if base_args.debug:
         args_train = set_num_epochs_debug(args_train)
         args_train = set_dir_debug(args_train)
 
-    train_loader, eval_loader, num_labels, num_labels_protected = get_data(args_train, debug=base_args.debug)
+    train_loader, eval_loader, num_labels, num_labels_protected = get_data(args_train, ds=base_args.ds, debug=base_args.debug)
 
     ### DEFINE MANUALLY
-    cp_dir = "checkpoints"
-    cp = "bert-base-uncased-adv_baseline.pt"
-    model_cls = AdvModel
+    cp_dir = "/share/home/lukash/checkpoints_bert_L4/seed0"
+    cp = "bert_uncased_L-4_H-256_A-4-fixmask0.1-modular.pt"
+    model_cls = ModularDiffModel
     ### DEFINE MANUALLY
 
     trainer = model_cls.load_checkpoint(f"{cp_dir}/{cp}")
@@ -60,7 +62,7 @@ def main():
         str(args_train.learning_rate)
     ])
     train_logger = TrainLogger(
-        log_dir = Path("logs"),
+        log_dir = Path(args_train.log_dir),
         logger_name = logger_name,
         logging_step = args_train.logging_step
     )
@@ -82,7 +84,8 @@ def main():
         adv_count = args_train.adv_count,
         adv_dropout = args_train.adv_dropout,
         num_epochs = args_train.num_epochs,
-        lr = args_train.learning_rate
+        lr = args_train.learning_rate,
+        cooldown = args_train.cooldown
     )
 
 if __name__ == "__main__":

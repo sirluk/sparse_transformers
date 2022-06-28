@@ -44,14 +44,16 @@ def read_label_file(filepath):
         return {v:k for k,v in enumerate([l for l in data.split("\n") if len(l)>0])}
 
 
-def get_data_loader(
+def _get_data_loader(
+    task_key,
+    protected_key,
+    text_key,
     tokenizer,
     data_path,
     labels_task_path,
     labels_prot_path=None,
     batch_size=16,
     max_length=200,
-    raw=False,
     shuffle=True,
     debug=False
 ):
@@ -75,28 +77,22 @@ def get_data_loader(
         }
         return x, labels_task, labels_prot
 
-    if raw:
-        text_fn = lambda x: x['raw'][x['start_pos']:]
-    else:
-        text_fn = lambda x: x["bio"]
-
     with open(data_path, 'rb') as file:
-        bio_dicts = pickle.load(file)
+        data_dicts = pickle.load(file)
 
     if debug:
-        cutoff = min(int(batch_size*10), len(bio_dicts))
-        bio_dicts = bio_dicts[:cutoff]
+        cutoff = min(int(batch_size*10), len(data_dicts))
+        data_dicts = data_dicts[:cutoff]
 
-    keys = ["gender", "title"]
-    x = [[d[k] for k in keys] + [text_fn(d)] for d in bio_dicts]
-    keys.append("text")
+    keys = [task_key, protected_key, text_key]
+    x = [[d[k] for k in keys] for d in data_dicts]
 
     data = dict(zip(keys, zip(*x)))
 
-    input_ids, token_type_ids, attention_masks = multiprocess_tokenization(list(data["text"]), tokenizer, max_length)
+    input_ids, token_type_ids, attention_masks = multiprocess_tokenization(list(data[text_key]), tokenizer, max_length)
 
     labels_task = read_label_file(labels_task_path)
-    labels_task = torch.tensor([labels_task[t] for t in data["title"]], dtype=torch.long)
+    labels_task = torch.tensor([labels_task[t] for t in data[task_key]], dtype=torch.long)
 
     tds = [
         input_ids,
@@ -107,7 +103,7 @@ def get_data_loader(
 
     if labels_prot_path:
         labels_prot = read_label_file(labels_prot_path)
-        tds.append(torch.tensor([labels_prot[t] for t in data["gender"]], dtype=torch.long))
+        tds.append(torch.tensor([labels_prot[t] for t in data[protected_key]], dtype=torch.long))
         collate_fn = batch_fn_prot
     else:
         collate_fn = batch_fn
@@ -117,3 +113,78 @@ def get_data_loader(
     _loader = DataLoader(_dataset, shuffle=shuffle, batch_size=batch_size, drop_last=False, collate_fn=collate_fn)
 
     return _loader
+
+
+def get_data_loader_bios(
+    tokenizer,
+    data_path,
+    labels_task_path,
+    labels_prot_path=None,
+    batch_size=16,
+    max_length=200,
+    shuffle=True,
+    debug=False
+):
+    return _get_data_loader(
+        "title",
+        "gender",
+        "bio",
+        tokenizer,
+        data_path,
+        labels_task_path,
+        labels_prot_path,
+        batch_size,
+        max_length,
+        shuffle,
+        debug
+    )
+
+
+def get_data_loader_pan16(
+    tokenizer,
+    data_path,
+    labels_task_path,
+    labels_prot_path=None,
+    batch_size=16,
+    max_length=200,
+    shuffle=True,
+    debug=False
+):
+    return _get_data_loader(
+        "age",
+        "gender",
+        "text",
+        tokenizer,
+        data_path,
+        labels_task_path,
+        labels_prot_path,
+        batch_size,
+        max_length,
+        shuffle,
+        debug
+    )
+
+
+def get_data_loader_hatespeech(
+    tokenizer,
+    data_path,
+    labels_task_path,
+    labels_prot_path=None,
+    batch_size=16,
+    max_length=200,
+    shuffle=True,
+    debug=False
+):
+    return _get_data_loader(
+        "label",
+        "dialect",
+        "tweet",
+        tokenizer,
+        data_path,
+        labels_task_path,
+        labels_prot_path,
+        batch_size,
+        max_length,
+        shuffle,
+        debug
+    )

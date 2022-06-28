@@ -68,7 +68,8 @@ class TaskModel(BaseModel):
         learning_rate_head: float,
         optimizer_warmup_steps: int,
         max_grad_norm: float,
-        output_dir: Union[str, os.PathLike]
+        output_dir: Union[str, os.PathLike],
+        cooldown: int
     ) -> None:
 
         self.global_step = 0
@@ -87,6 +88,7 @@ class TaskModel(BaseModel):
         train_str = "Epoch {}, {}"
         str_suffix = lambda d: ", ".join([f"{k}: {v}" for k,v in d.items()])
 
+        performance_decrease_counter = 0
         train_iterator = trange(num_epochs, desc=train_str.format(0, ""), leave=False, position=0)
         for epoch in train_iterator:
 
@@ -110,10 +112,20 @@ class TaskModel(BaseModel):
                 train_str.format(epoch, str_suffix(result)), refresh=True
             )
 
-            if logger.is_best(result):
+            if logger.is_best(result, ascending=True, k="loss", binary=True, suffix="task"):
                 cpt = self.save_checkpoint(Path(output_dir))
+                cpt_epoch = epoch
+                performance_decrease_counter = 0
+            else:
+                performance_decrease_counter += 1
 
-        print("Final results after " + train_str.format(epoch, str_suffix(result)))
+            if performance_decrease_counter>cooldown:
+                break
+
+        logger.write_best_eval_metric()
+
+        print("Final result after " + train_str.format(epoch, str_suffix(result)))
+        print("Best result: " + train_str.format(cpt_epoch, str_suffix(logger.best_eval_metric)))
         
         return cpt
 
@@ -157,8 +169,7 @@ class TaskModel(BaseModel):
             # self.scheduler.step()
             self.zero_grad()
 
-            logger.step_loss(self.global_step, loss.item(), increment_steps=False)
-            logger.step_loss(self.global_step, loss.item(), suffix="task")
+            logger.step_loss(self.global_step, {"total": loss.item(), "task": loss.item()})
 
             epoch_iterator.set_description(epoch_str.format(step, loss.item()), refresh=True)
 

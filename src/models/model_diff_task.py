@@ -66,6 +66,7 @@ class TaskDiffModel(BasePruningModel):
         num_epochs_finetune: int,
         num_epochs_fixmask: int,
         alpha_init: Union[int, float],
+        concrete_samples: int,
         concrete_lower: float,
         concrete_upper: float,
         structured_diff_pruning: bool,
@@ -78,6 +79,7 @@ class TaskDiffModel(BasePruningModel):
         weight_decay: float,
         max_grad_norm: float,
         output_dir: Union[str, os.PathLike],
+        cooldown: int,
         fixmask_pct: Optional[float] = None
     ) -> None:
 
@@ -89,14 +91,18 @@ class TaskDiffModel(BasePruningModel):
         log_ratio = self.get_log_ratio(concrete_lower, concrete_upper)
 
         self._init_sparsity_pen(sparsity_pen)
-        self._add_diff_parametrizations(
-            n_parametrizations = 1,
-            p_requires_grad = False,
-            alpha_init = alpha_init,
-            concrete_lower = concrete_lower,
-            concrete_upper = concrete_upper,
-            structured = structured_diff_pruning
-        )
+
+        if not self.parametrized:
+            self._add_diff_parametrizations(
+                n_parametrizations = 1,
+                p_requires_grad = False,
+                alpha_init = alpha_init,
+                concrete_lower = concrete_lower,
+                concrete_upper = concrete_upper,
+                structured = structured_diff_pruning
+            )
+        else:
+            assert self.finetune_state or (self.fixmask_state and num_epochs_finetune==0), "model is in fixmask state but num_epochs_fintune>0"
 
         self._init_optimizer_and_schedule(
             train_steps_finetune,
@@ -111,6 +117,7 @@ class TaskDiffModel(BasePruningModel):
         train_str = "Epoch {}, model_state: {}, {}"
         str_suffix = lambda d, suffix="": ", ".join([f"{k}{suffix}: {v}" for k,v in d.items()])
 
+        performance_decrease_counter = 0
         train_iterator = trange(num_epochs_total, desc=train_str.format(0, self.model_state, ""), leave=False, position=0)
         for epoch in train_iterator:
 
@@ -132,7 +139,8 @@ class TaskDiffModel(BasePruningModel):
                 loss_fn,
                 logger,
                 log_ratio,
-                max_grad_norm
+                max_grad_norm,
+                concrete_samples
             )
 
             result = self.evaluate(
@@ -153,16 +161,25 @@ class TaskDiffModel(BasePruningModel):
                 train_str.format(epoch, self.model_state, str_suffix(result)), refresh=True
             )
 
-            if ((num_epochs_fixmask > 0) and (self.model_state==ModelState.FIXMASK)) or (num_epochs_fixmask == 0):
-                if logger.is_best(result):
+            if self.fixmask_state or (num_epochs_fixmask == 0):
+                if logger.is_best(result, ascending=True, k="loss", binary=True, suffix="task"):
                     cpt = self.save_checkpoint(
                         Path(output_dir),
                         concrete_lower,
                         concrete_upper,
                         structured_diff_pruning
                     )
+                    cpt_epoch = epoch
+                    cpt_model_state = self.model_state
+                    performance_decrease_counter = 0
+                else:
+                    performance_decrease_counter += 1
+
+                if performance_decrease_counter>cooldown:
+                    break
 
         print("Final results after " + train_str.format(epoch, self.model_state, str_suffix(result)))
+        print("Best result: " + train_str.format(cpt_epoch, cpt_model_state, str_suffix(logger.best_eval_metric)))
 
         return cpt
 
@@ -188,29 +205,40 @@ class TaskDiffModel(BasePruningModel):
         loss_fn: Callable,
         logger: TrainLogger,
         log_ratio: float,
-        max_grad_norm: float
+        max_grad_norm: float,
+        concrete_samples: int
     ) -> None:
     
         self.train()
 
-        epoch_str = "training - step {}, loss: {:7.5f}, loss without l0 pen: {:7.5f}"
+        epoch_str = "training - step {}, loss: {:7.5f}, loss l0 pen: {:7.5f}"
         epoch_iterator = tqdm(train_loader, desc=epoch_str.format(0, math.nan, math.nan), leave=False, position=1)
         for step, batch in enumerate(epoch_iterator):
 
-            inputs, labels = batch[0], batch[1]
+            inputs, labels, _ = batch
             inputs = dict_to_device(inputs, self.device)
-            outputs = self(**inputs)
-            loss = loss_fn(outputs, labels.to(self.device))
 
-            loss_task = loss.item()
+            concrete_samples = concrete_samples if self.finetune_state else 1
+            
+            losses = torch.zeros((3,))
+            for _ in range(concrete_samples):
 
-            if self.model_state == ModelState.FINETUNING:
-                loss_l0 = self._get_sparsity_pen(log_ratio, 0)
-                loss += loss_l0
-            else:
-                loss_l0 = torch.tensor(0.)
+                loss = 0.
 
-            loss.backward()
+                outputs = self(**inputs)
+                loss_task = loss_fn(outputs, labels.to(self.device))
+                loss += loss_task
+
+                if self.finetune_state:
+                    loss_l0 = self._get_sparsity_pen(log_ratio, 0)
+                    loss += loss_l0
+                else:
+                    loss_l0 = torch.tensor(0.)
+
+                losses += torch.tensor([loss, loss_task, loss_l0]).detach()
+
+                loss /= concrete_samples
+                loss.backward()
 
             torch.nn.utils.clip_grad_norm_(self.parameters(), max_grad_norm)
 
@@ -218,10 +246,11 @@ class TaskDiffModel(BasePruningModel):
             # self.scheduler.step()
             self.zero_grad()
 
-            logger.step_loss(self.global_step, loss.item(), increment_steps=False)
-            logger.step_loss(self.global_step, {"task": loss_task, "l0": loss_l0.item()})
+            losses /= concrete_samples
+            losses_dict = dict(zip(["total", "task_adv", "l0_adv"], losses.tolist()))
+            logger.step_loss(self.global_step, losses_dict)
 
-            epoch_iterator.set_description(epoch_str.format(step, loss.item(), loss_task), refresh=True)
+            epoch_iterator.set_description(epoch_str.format(step, losses[0], losses[2]), refresh=True)
 
             self.global_step += 1
 
@@ -237,9 +266,7 @@ class TaskDiffModel(BasePruningModel):
         num_warmup_steps: int = 0
     ) -> None:
 
-        optimizer_param_groups = self._get_diff_param_groups(learning_rate, weight_decay, learning_rate_alpha, 0)
-
-        optimizer_param_groups.extend([
+        optimizer_param_groups = [
             {
                 "params": self.bottleneck.parameters(),
                 "lr": learning_rate_bottleneck
@@ -248,7 +275,11 @@ class TaskDiffModel(BasePruningModel):
                 "params": self.task_head.parameters(),
                 "lr": learning_rate_head
             }
-        ])
+        ]
+
+        optimizer_param_groups.extend(
+            self._get_diff_param_groups(learning_rate, weight_decay, learning_rate_alpha, 0)
+        )
 
         self.optimizer = AdamW(optimizer_param_groups, betas=(0.9, 0.999), eps=1e-08)
 
@@ -283,7 +314,9 @@ class TaskDiffModel(BasePruningModel):
 
         output_dir = Path(output_dir)
         output_dir.mkdir(parents=True, exist_ok=True)
-        suffix = f"fixmask{self.fixmask_pct}" if self.model_state == ModelState.FIXMASK else "diff_pruning"
+
+        suffix = f"fixmask{self.fixmask_pct}" if self.fixmask_state else "diff_pruning"
+        
         filename = f"{self.model_name.split('/')[-1]}-{suffix}-task.pt"
         filepath = output_dir / filename
         torch.save(info_dict, filepath)

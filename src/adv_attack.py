@@ -45,8 +45,11 @@ def adv_attack(
     adv_count: int,
     adv_dropout: int,
     num_epochs: int,
-    lr: float
+    lr: float,
+    cooldown: int
 ):
+
+    logger.reset()
 
     adv_head = AdvHead(
         adv_count,
@@ -68,6 +71,7 @@ def adv_attack(
     train_str = "Epoch {}, {}"
     result_str = lambda x: ", ".join([f"{k}: {v}" for k,v in x.items()])
 
+    performance_decrease_counter = 0
     train_iterator = trange(num_epochs, desc=train_str.format(0, ""), leave=False, position=0)
     for epoch in train_iterator:
 
@@ -97,9 +101,28 @@ def adv_attack(
         result = trainer._evaluate(val_loader, forward_fn, loss_fn, pred_fn, metrics, adv_head=adv_head)
 
         logger.validation_loss(epoch, result, "adv_attack")
+        d = {
+            "loss": True,
+            "acc": False,
+            "balanced_acc": False
+        }
+        logger.log_best({k: result[k] for k in d.keys()}, ascending=d.values(), suffix="adv_attack")
 
         train_iterator.set_description(
             train_str.format(epoch, result_str(result)), refresh=True
         )
 
-    print("Adv Attack: Final results after " +  train_str.format(epoch, result_str(result)))
+        if logger.is_best(result, ascending=False, k="loss", binary=True, suffix="adv_attack"):
+            best_epoch = epoch
+            performance_decrease_counter = 0
+        else:
+            performance_decrease_counter += 1
+
+        if performance_decrease_counter>cooldown:
+            break
+
+    logger.write_best_eval_metric()
+
+    print("Adv Attack: Final result after " +  train_str.format(epoch, result_str(result)))
+    print("Adv Attack: Best result " +  train_str.format(best_epoch, result_str(logger.best_eval_metric)))
+    

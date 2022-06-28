@@ -42,6 +42,7 @@ def train_diff_pruning_task(device, train_loader, val_loader, num_labels, train_
         num_epochs_finetune = args_train.num_epochs_finetune,
         num_epochs_fixmask = args_train.num_epochs_fixmask,
         alpha_init = args_train.alpha_init,
+        concrete_samples = args_train.concrete_samples,
         concrete_lower = args_train.concrete_lower,
         concrete_upper = args_train.concrete_upper,
         structured_diff_pruning = args_train.structured_diff_pruning,
@@ -54,6 +55,7 @@ def train_diff_pruning_task(device, train_loader, val_loader, num_labels, train_
         weight_decay = args_train.weight_decay,
         max_grad_norm = args_train.max_grad_norm,
         output_dir = args_train.output_dir,
+        cooldown = args_train.cooldown,
         fixmask_pct = args_train.fixmask_pct
     )
     trainer = TaskDiffModel.load_checkpoint(trainer_cp)
@@ -95,12 +97,12 @@ def train_diff_pruning_adv(device, train_loader, val_loader, num_labels, num_lab
         num_epochs_finetune = args_train.num_epochs_finetune,
         num_epochs_fixmask = args_train.num_epochs_fixmask,
         alpha_init = args_train.alpha_init,
+        concrete_samples = args_train.concrete_samples,
         concrete_lower = args_train.concrete_lower,
         concrete_upper = args_train.concrete_upper,
         structured_diff_pruning = args_train.structured_diff_pruning,
         adv_lambda = args_train.adv_lambda,
         sparsity_pen = args_train.sparsity_pen,
-        task_only_l0 = args_train.task_only_l0,
         learning_rate = args_train.learning_rate,
         learning_rate_bottleneck = args_train.learning_rate_bottleneck,
         learning_rate_task_head = args_train.learning_rate_task_head,
@@ -151,6 +153,7 @@ def train_diff_pruning_modular(device, train_loader, val_loader, num_labels, num
         num_epochs_finetune = args_train.num_epochs_finetune,
         num_epochs_fixmask = args_train.num_epochs_fixmask,
         alpha_init = args_train.alpha_init,
+        concrete_samples = args_train.concrete_samples,
         concrete_lower = args_train.concrete_lower,
         concrete_upper = args_train.concrete_upper,
         structured_diff_pruning = args_train.structured_diff_pruning,
@@ -200,7 +203,8 @@ def train_baseline_task(device, train_loader, val_loader, num_labels, train_logg
         learning_rate_head = args_train.learning_rate_task_head,
         optimizer_warmup_steps = args_train.optimizer_warmup_steps,
         max_grad_norm = args_train.max_grad_norm,
-        output_dir = args_train.output_dir
+        output_dir = args_train.output_dir,
+        cooldown = args_train.cooldown
     )
     trainer = TaskModel.load_checkpoint(trainer_cp)
     trainer.to(device)
@@ -264,6 +268,7 @@ def main():
     parser.add_argument("--run_adv_attack", type=bool, default=True, help="Set to false if you do not want to run adverserial attack after training")
     parser.add_argument("--gpu_id", nargs="*", type=int, default=[0], help="")
     parser.add_argument("--seed", type=int, default=0, help="torch random seed")
+    parser.add_argument("--ds", type=str, default="bios", help="dataset")
     base_args = parser.parse_args()
 
     torch.manual_seed(base_args.seed)
@@ -272,7 +277,8 @@ def main():
     with open("cfg.yml", "r") as f:
         cfg = yaml.safe_load(f)
     train_cfg = "train_config_baseline" if base_args.baseline else "train_config_diff_pruning"
-    args_train = argparse.Namespace(**cfg[train_cfg], **cfg["data_config"], **cfg["model_config"])
+    data_cfg = f"data_config_{base_args.ds}"
+    args_train = argparse.Namespace(**cfg[train_cfg], **cfg[data_cfg], **cfg["model_config"])
     args_attack = argparse.Namespace(**cfg["adv_attack"])
 
     if base_args.debug:
@@ -282,8 +288,8 @@ def main():
 
     device = get_device(base_args.gpu_id)
 
-    train_loader, val_loader, num_labels, num_labels_protected = get_data(args_train, debug=base_args.debug)
-
+    train_loader, val_loader, num_labels, num_labels_protected = get_data(args_train, ds=base_args.ds, debug=base_args.debug)
+    
     train_logger = get_logger(base_args.baseline, base_args.adv, base_args.modular, args_train, base_args.debug)
 
     print(f"Running {train_logger.logger_name}")
@@ -314,7 +320,8 @@ def main():
             adv_count = args_attack.adv_count,
             adv_dropout = args_attack.adv_dropout,
             num_epochs = args_attack.num_epochs,
-            lr = args_attack.learning_rate
+            lr = args_attack.learning_rate,
+            cooldown = args_attack.cooldown
         )
 
 

@@ -1,19 +1,35 @@
-data_config:
+data_config_bios:
     train_pkl: "/share/cp/datasets/nlp/text_classification_bias/bios/only_task_balanced/train_balanced_every_job.pkl"
     val_pkl: "/share/cp/datasets/nlp/text_classification_bias/bios/only_task_balanced/val.pkl"
     test_pkl: "/share/cp/datasets/nlp/text_classification_bias/bios/only_task_balanced/test.pkl"
     labels_protected_path: "/share/cp/datasets/nlp/text_classification_bias/bios/labels_protected_gender.txt"
     labels_task_path: "/share/cp/datasets/nlp/text_classification_bias/bios/labels_task.txt"
-    output_dir: "checkpoints"
-    log_dir: "logs"
+    output_dir: "checkpoints_bios"
+    log_dir: "logs_bios"
+data_config_pan16:
+    train_pkl: "/share/cp/datasets/nlp/text_classification_bias/PAN16_prep/train_balanced_every_age.pkl"
+    val_pkl: "/share/cp/datasets/nlp/text_classification_bias/PAN16_prep/test.pkl"
+    test_pkl: "/share/cp/datasets/nlp/text_classification_bias/PAN16_prep/test.pkl"
+    labels_protected_path: "/share/cp/datasets/nlp/text_classification_bias/PAN16_prep/labels_protected_gender.txt"
+    labels_task_path: "/share/cp/datasets/nlp/text_classification_bias/PAN16_prep/labels_task.txt"
+    output_dir: "checkpoints_pan16"
+    log_dir: "logs_pan16"
+data_config_hatespeech:
+    train_pkl: "/share/cp/datasets/nlp/hate_speech/Twitter/AAEpredicted/pickle_format/train.pkl"
+    val_pkl: "/share/cp/datasets/nlp/hate_speech/Twitter/AAEpredicted/pickle_format/val.pkl"
+    test_pkl: "/share/cp/datasets/nlp/hate_speech/Twitter/AAEpredicted/pickle_format/test.pkl"
+    labels_protected_path: "/share/cp/datasets/nlp/hate_speech/Twitter/AAEpredicted/pickle_format/labels_protected_race.txt"
+    labels_task_path: "/share/cp/datasets/nlp/hate_speech/Twitter/AAEpredicted/pickle_format/labels_task.txt"
+    output_dir: "checkpoints_hatespeech"
+    log_dir: "logs_hatespeech"
 model_config:
     model_name: "google/bert_uncased_L-4_H-256_A-4" # "bert-base-uncased" # "google/bert_uncased_L-4_H-256_A-4" # "google/bert_uncased_L-2_H-128_A-2"
     batch_size: 64
 train_config_diff_pruning:
     bottleneck: False
     structured_diff_pruning: True
-    task_only_l0: False
     alpha_init: 5
+    concrete_samples: 1
     concrete_lower: -1.5
     concrete_upper: 1.5
     num_epochs_warmup: 0
@@ -38,6 +54,7 @@ train_config_diff_pruning:
     max_grad_norm: 1.0
     fixmask_pct: 0.1
     logging_step: 5
+    cooldown: 5
 train_config_baseline:
     bottleneck: False
     num_epochs_warmup: 0
@@ -57,12 +74,14 @@ train_config_baseline:
     optimizer_warmup_steps: 0
     max_grad_norm: 1.0
     logging_step: 5
+    cooldown: 5
 adv_attack:
-    num_epochs: 40
+    num_epochs: 100
     learning_rate: 1e-4
     adv_n_hidden: 1
     adv_count: 5
     adv_dropout: .3
     logging_step: 5
+    cooldown: 5
 
 

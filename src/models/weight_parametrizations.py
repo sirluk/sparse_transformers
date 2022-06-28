@@ -4,7 +4,7 @@ import torch
 from  torch import nn
 from torch.nn.parameter import Parameter
 
-from typing import Tuple, Optional
+from typing import Tuple
 
 from src.utils import concrete_stretched
 
@@ -134,75 +134,3 @@ class DoubleDiffWeightFinetune(nn.Module):
         if tmp_state: self.eval()
         yield
         if tmp_state: self.train()
-
-
-# class DoubleDiffWeightFinetune(nn.Module):
-
-#     class WeightState(Enum):
-#         TRAIN_FIRST = auto()
-#         TRAIN_SECOND = auto()
-
-#     def __init__(self, weight, alpha_init, concrete_lower, concrete_upper, structured):
-#         super().__init__()
-#         self.concrete_lower = concrete_lower
-#         self.concrete_upper = concrete_upper
-#         self.structured = structured
-
-#         for i in range(2):
-#             self.register_parameter(f"finetune{i}", Parameter(torch.clone(weight)))
-#             self.register_parameter(f"alpha{i}", Parameter(torch.zeros_like(weight) + alpha_init))
-
-#             if structured:
-#                 self.register_parameter(f"alpha_group{i}", Parameter(torch.zeros((1,), device=weight.device) + alpha_init))
-        
-#         self.set_weight_state()
-
-#     def forward(self, X):
-#         if self.weight_state == self.WeightState.TRAIN_FIRST:
-#             with torch.no_grad():
-#                 diff = (self.finetune0 - X)
-#             return (self.finetune0 - diff) + self.z(0) * (self.finetune0 - X)
-#         else:
-#             with torch.no_grad(), self.deterministic():
-#                 diff_first = self.z(0) * (self.finetune0 - X)
-#                 temp_second = self.finetune1 - X - diff_first        
-#             return (self.finetune1 - temp_second) + self.z(0) * self.z(1) * (self.finetune1 - X - diff_first)
-
-#     def z(self, idx: int) -> Parameter:
-#         z = self.dist(getattr(self, f"alpha{idx}"))
-#         if self.structured:
-#             z *= self.dist(getattr(self, f"alpha_group{idx}"))
-#         return z    
-
-#     def dist(self, alpha) -> torch.Tensor:
-#         return concrete_stretched(
-#             alpha,
-#             l=self.concrete_lower,
-#             r=self.concrete_upper,
-#             deterministic=(not self.training)
-#         )
-
-#     @torch.no_grad()
-#     def get_diff_weights(self, X: Parameter) -> Tuple[torch.Tensor, torch.Tensor]:
-#         with self.deterministic():
-#             diff_first = self.z(0) * (self.finetune0 - X)
-#             diff_second = self.z(0) * self.z(1) * (self.finetune1 - X - diff_first)
-#             return diff_first, diff_second
-
-#     @torch.no_grad()
-#     def get_z_masks(self) -> Tuple[torch.Tensor, torch.Tensor]:
-#         with self.deterministic():
-#             return self.z(0), self.z(1)
-
-#     def set_weight_state(self, first: bool = True) -> None:
-#         if first:
-#             self.weight_state = self.WeightState.TRAIN_FIRST
-#         else:
-#             self.weight_state = self.WeightState.TRAIN_SECOND
-
-#     @contextlib.contextmanager
-#     def deterministic(self):
-#         tmp_state = self.training
-#         if tmp_state: self.eval()
-#         yield
-#         if tmp_state: self.train()

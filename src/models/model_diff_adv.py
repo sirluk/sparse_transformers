@@ -83,12 +83,12 @@ class AdvDiffModel(BasePruningModel):
         num_epochs_finetune: int,
         num_epochs_fixmask: int,
         alpha_init: Union[int, float],
+        concrete_samples: int,
         concrete_lower: float,
         concrete_upper: float,
         structured_diff_pruning: bool,
         adv_lambda: float,
         sparsity_pen: Union[float,list],
-        task_only_l0: bool,
         learning_rate: float,
         learning_rate_bottleneck: float,
         learning_rate_task_head: float,
@@ -101,9 +101,6 @@ class AdvDiffModel(BasePruningModel):
         fixmask_pct: Optional[float] = None
     ) -> None:
 
-        if task_only_l0:
-            assert num_epochs_fixmask>0, "in case of task only diffpruning 'num_epochs_fixmask' needs to be >0"
-
         self.global_step = 0
         num_epochs_finetune += num_epochs_warmup
         num_epochs_total = num_epochs_finetune + num_epochs_fixmask
@@ -113,14 +110,18 @@ class AdvDiffModel(BasePruningModel):
         log_ratio = self.get_log_ratio(concrete_lower, concrete_upper)
 
         self._init_sparsity_pen(sparsity_pen)
-        self._add_diff_parametrizations(
-            n_parametrizations = 1,
-            p_requires_grad = False,
-            alpha_init = alpha_init,
-            concrete_lower = concrete_lower,
-            concrete_upper = concrete_upper,
-            structured = structured_diff_pruning
-        )
+
+        if not self.parametrized:
+            self._add_diff_parametrizations(
+                n_parametrizations = 1,
+                p_requires_grad = False,
+                alpha_init = alpha_init,
+                concrete_lower = concrete_lower,
+                concrete_upper = concrete_upper,
+                structured = structured_diff_pruning
+            )
+        else:
+            assert self.finetune_state or (self.fixmask_state and num_epochs_finetune==0), "model is in fixmask state but num_epochs_fintune>0"
 
         self._init_optimizer_and_schedule(
             train_steps_finetune,
@@ -165,7 +166,7 @@ class AdvDiffModel(BasePruningModel):
                 max_grad_norm,
                 loss_fn_protected,
                 _adv_lambda,
-                task_only_l0
+                concrete_samples
             )
 
             result = self.evaluate(
@@ -198,16 +199,15 @@ class AdvDiffModel(BasePruningModel):
                 train_str.format(epoch, self.model_state, result_str), refresh=True
             )
 
-            if ((num_epochs_fixmask > 0) and (self.model_state==ModelState.FIXMASK)) or ((num_epochs_fixmask == 0) and (epoch >= num_epochs_warmup)):
+            if self.fixmask_state or ((num_epochs_fixmask == 0) and (epoch >= num_epochs_warmup)):
                 cpt = self.save_checkpoint(
                     Path(output_dir),
                     concrete_lower,
                     concrete_upper,
-                    structured_diff_pruning,
-                    task_only_l0
+                    structured_diff_pruning
                 )
 
-        print("Final results after " + train_str.format(epoch, self.model_state, result_str))
+        print("Final result after " + train_str.format(epoch, self.model_state, result_str))
 
         return cpt
 
@@ -244,39 +244,44 @@ class AdvDiffModel(BasePruningModel):
         max_grad_norm: float,
         loss_fn_protected: Callable,
         adv_lambda: float,
-        task_only_l0: bool
+        concrete_samples: int
     ) -> None:
 
         self.train()
 
-        epoch_str = "training - step {}, loss: {:7.5f}, loss without l0 pen: {:7.5f}"
+        epoch_str = "training - step {}, loss: {:7.5f}, loss l0 pen: {:7.5f}"
         epoch_iterator = tqdm(train_loader, desc=epoch_str.format(0, math.nan, math.nan), leave=False, position=1)
         for step, batch in enumerate(epoch_iterator):
 
             inputs, labels_task, labels_protected = batch
             inputs = dict_to_device(inputs, self.device)
 
-            hidden = self._forward(**inputs)
-            outputs_task = self.task_head(hidden)
-            loss = loss_fn(outputs_task, labels_task.to(self.device))
-            loss_task = loss.item()
+            concrete_samples = concrete_samples if self.finetune_state else 1
 
-            if (task_only_l0 and self.model_state == ModelState.FINETUNING):
-                adv_lambda = 0.
-            
-            outputs_protected = self.adv_head.forward_reverse(hidden, lmbda=adv_lambda)
-            loss_protected = self._get_mean_loss(outputs_protected, labels_protected.to(self.device), loss_fn_protected)
-            loss += loss_protected
+            losses = torch.zeros((4,))
+            for _ in range(concrete_samples):
 
-            loss_no_pen = loss.item()
+                loss = 0.
 
-            if self.model_state == ModelState.FINETUNING:
-                loss_l0 = self._get_sparsity_pen(log_ratio, 0)
-                loss += loss_l0
-            else:
-                loss_l0 = torch.tensor(0.)
+                hidden = self._forward(**inputs)
+                outputs_task = self.task_head(hidden)
+                loss_task = loss_fn(outputs_task, labels_task.to(self.device))
+                loss += loss_task
+                
+                outputs_protected = self.adv_head.forward_reverse(hidden, lmbda = adv_lambda)
+                loss_protected = self._get_mean_loss(outputs_protected, labels_protected.to(self.device), loss_fn_protected)
+                loss += loss_protected
 
-            loss.backward()
+                if self.finetune_state:
+                    loss_l0 = self._get_sparsity_pen(log_ratio, 0)
+                    loss += loss_l0
+                else: 
+                    loss_l0 = torch.tensor(0.)
+
+                losses += torch.tensor([loss, loss_task, loss_protected, loss_l0]).detach()
+
+                loss /= concrete_samples
+                loss.backward()
 
             torch.nn.utils.clip_grad_norm_(self.parameters(), max_grad_norm)
 
@@ -284,10 +289,11 @@ class AdvDiffModel(BasePruningModel):
             # self.scheduler.step()
             self.zero_grad()
 
-            logger.step_loss(self.global_step, loss.item(), increment_steps=False)
-            logger.step_loss(self.global_step, {"task_adv": loss_task, "protected": loss_protected.item(), "l0_adv": loss_l0.item()})
+            losses /= concrete_samples
+            losses_dict = dict(zip(["total_adv", "task_adv", "protected", "l0_adv"], losses.tolist()))
+            logger.step_loss(self.global_step, losses_dict)
 
-            epoch_iterator.set_description(epoch_str.format(step, loss.item(), loss_no_pen), refresh=True)
+            epoch_iterator.set_description(epoch_str.format(step, losses[0], losses[3]), refresh=True)
 
             self.global_step += 1     
 
@@ -304,9 +310,7 @@ class AdvDiffModel(BasePruningModel):
         num_warmup_steps: int = 0
     ) -> None:
 
-        optimizer_param_groups = self._get_diff_param_groups(learning_rate, weight_decay, learning_rate_alpha, 0)
-
-        optimizer_param_groups.extend([
+        optimizer_param_groups = [
             {
                 "params": self.bottleneck.parameters(),
                 "lr": learning_rate_bottleneck
@@ -319,7 +323,11 @@ class AdvDiffModel(BasePruningModel):
                 "params": self.adv_head.parameters(),
                 "lr": learning_rate_adv_head
             }
-        ])
+        ]
+
+        optimizer_param_groups.extend(
+            self._get_diff_param_groups(learning_rate, weight_decay, learning_rate_alpha, 0)
+        )
 
         self.optimizer = AdamW(optimizer_param_groups, betas=(0.9, 0.999), eps=1e-08)
 
@@ -333,8 +341,7 @@ class AdvDiffModel(BasePruningModel):
         output_dir: Union[str, os.PathLike],
         concrete_lower: float,
         concrete_upper: float,
-        structured_diff_pruning: bool,
-        task_only_l0: bool
+        structured_diff_pruning: bool
     ) -> None:
         info_dict = {
             "model_name": self.model_name,
@@ -361,8 +368,7 @@ class AdvDiffModel(BasePruningModel):
         output_dir = Path(output_dir)
         output_dir.mkdir(parents=True, exist_ok=True)
 
-        suffix = f"fixmask{self.fixmask_pct}" if self.model_state == ModelState.FIXMASK else "diff_pruning"
-        if task_only_l0: suffix = suffix + "-task_only_l0"
+        suffix = f"fixmask{self.fixmask_pct}" if self.fixmask_state else "diff_pruning"
 
         filename = f"{self.model_name.split('/')[-1]}-{suffix}-adv.pt"
         filepath = output_dir / filename

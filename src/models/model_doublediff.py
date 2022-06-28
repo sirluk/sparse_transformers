@@ -89,6 +89,7 @@ class DoubleDiffModel(BasePruningModel):
         num_epochs_finetune: int,
         num_epochs_fixmask: int,
         alpha_init: Union[int, float],
+        concrete_samples: int,
         concrete_lower: float,
         concrete_upper: float,
         structured_diff_pruning: bool,
@@ -164,7 +165,8 @@ class DoubleDiffModel(BasePruningModel):
                 log_ratio,
                 max_grad_norm,
                 loss_fn_protected,
-                _adv_lambda
+                _adv_lambda,
+                concrete_samples
             )
 
             result = self.evaluate(
@@ -208,7 +210,7 @@ class DoubleDiffModel(BasePruningModel):
                 train_str.format(epoch, self.model_state, result_str), refresh=True
             )
 
-            if ((num_epochs_fixmask > 0) and (self.model_state==ModelState.FIXMASK)) or ((num_epochs_fixmask == 0) and (epoch >= num_epochs_warmup)):
+            if self.fixmask_state or ((num_epochs_fixmask == 0) and (epoch >= num_epochs_warmup)):
                 cpt = self.save_checkpoint(
                     Path(output_dir),
                     concrete_lower,
@@ -262,7 +264,8 @@ class DoubleDiffModel(BasePruningModel):
         log_ratio: float,
         max_grad_norm: float,
         loss_fn_protected: Callable,
-        adv_lambda: float
+        adv_lambda: float,
+        concrete_samples: int
     ) -> None:
 
         self.train()
@@ -274,26 +277,37 @@ class DoubleDiffModel(BasePruningModel):
             inputs, labels_task, labels_protected = batch
             inputs = dict_to_device(inputs, self.device)
 
+            concrete_samples = concrete_samples if self.finetune_state else 1
+
             ##################################################
             # START STEP TASK
             self.set_debiased(False)
 
-            outputs = self(**inputs)
-            loss = loss_fn(outputs, labels_task.to(self.device))
-            loss_task = loss.item()
+            losses_biased = torch.zeros((3,))
+            for _ in range(concrete_samples):
 
-            if self.model_state == ModelState.FINETUNING:
-                loss_l0 = self._get_sparsity_pen(log_ratio)
-                loss += loss_l0
-            else:
-                loss_l0 = torch.tensor(0.)
+                loss = 0.
 
-            loss_biased = loss.item()
+                outputs = self(**inputs)
+                loss_task = loss_fn(outputs, labels_task.to(self.device))
+                loss += loss_task
 
-            loss.backward()
+                if self.finetune_state:
+                    loss_l0 = self._get_sparsity_pen(log_ratio)
+                    loss += loss_l0
+                else:
+                    loss_l0 = torch.tensor(0.)
+
+                losses_biased += torch.tensor([loss, loss_task, loss_l0]).detach()
+
+                loss /= concrete_samples
+                loss.backward()
+
             torch.nn.utils.clip_grad_norm_(self.parameters(), max_grad_norm)
+
             self.optimizer.step() # TODO check if step only at end is better
             self.zero_grad()
+            losses_biased /= concrete_samples
 
             # END STEP TASK
             ##################################################
@@ -302,43 +316,54 @@ class DoubleDiffModel(BasePruningModel):
             # START STEP DEBIAS
             self.set_debiased(True)
 
-            hidden = self._forward(**inputs)
-            outputs_task = self.task_head(hidden)
-            loss = loss_fn(outputs_task, labels_task.to(self.device))
-            loss_task_adv = loss.item()
+            losses_debiased = torch.zeros((4,))
+            for _ in range(concrete_samples):
 
-            outputs_protected = self.adv_head.forward_reverse(hidden, lmbda=adv_lambda)
-            loss_protected = self._get_mean_loss(outputs_protected, labels_protected.to(self.device), loss_fn_protected)
-            loss += loss_protected
+                loss = 0.
 
-            if self.model_state == ModelState.FINETUNING:
-                loss_l0_adv = self._get_sparsity_pen(log_ratio)
-                loss += loss_l0_adv
-            else:
-                loss_l0_adv = torch.tensor(0.)
+                hidden = self._forward(**inputs)
+                outputs_task = self.task_head(hidden)
+                loss = loss_fn(outputs_task, labels_task.to(self.device))
+                loss_task_adv = loss.item()
 
-            loss_debiased = loss.item()
+                outputs_protected = self.adv_head.forward_reverse(hidden, lmbda=adv_lambda)
+                loss_protected = self._get_mean_loss(outputs_protected, labels_protected.to(self.device), loss_fn_protected)
+                loss += loss_protected
 
-            loss.backward()
+                if self.finetune_state:
+                    loss_l0_adv = self._get_sparsity_pen(log_ratio)
+                    loss += loss_l0_adv
+                else:
+                    loss_l0_adv = torch.tensor(0.)
+
+                losses_debiased += torch.tensor([loss, loss_task_adv, loss_protected, loss_l0_adv]).detach()
+
+                loss /= concrete_samples
+                loss.backward()
+
             torch.nn.utils.clip_grad_norm_(self.parameters(), max_grad_norm)
+
             self.optimizer.step()
             self.zero_grad()
+            losses_debiased /= concrete_samples
 
             # END STEP DEBIAS
             ##################################################
 
             # self.scheduler.step()
 
-            logger.step_loss(self.global_step, loss.item(), increment_steps=False)
-            logger.step_loss(self.global_step, {
-                "task": loss_task,
-                "l0": loss_l0.item(),
-                "task_adv": loss_task_adv,
-                "protected": loss_protected.item(),
-                "l0_adv": loss_l0_adv.item()
-            })
+            losses_dict = {
+                "total": losses_biased[0],
+                "task": losses_biased[1],
+                "l0": losses_biased[2],
+                "total_adv": losses_debiased[0],
+                "task_adv": losses_debiased[1],
+                "protected": losses_debiased[2],
+                "l0_adv": losses_debiased[3]
+            }
+            logger.step_loss(self.global_step, losses_dict)
 
-            epoch_iterator.set_description(epoch_str.format(step, loss_biased, loss_debiased), refresh=True)
+            epoch_iterator.set_description(epoch_str.format(step, losses_biased[0], losses_debiased[0]), refresh=True)
 
             self.global_step += 1
 
@@ -351,10 +376,10 @@ class DoubleDiffModel(BasePruningModel):
             self.bottleneck = self.bottleneck_biased
             self.task_head = self.task_head_biased
 
-        if self.model_state == ModelState.FIXMASK:
+        if self.fixmask_state:
             self._activate_parametrizations(debiased, 1)
             self._freeze_parametrizations(debiased, 0)
-        elif self.model_state == ModelState.FINETUNING:
+        elif self.finetune_state:
             for base_module in self.get_encoder_base_modules():
                 for par_list in base_module.parametrizations.values():
                     par_list[0].set_weight_state(first = not debiased)
@@ -439,7 +464,9 @@ class DoubleDiffModel(BasePruningModel):
 
         output_dir = Path(output_dir)
         output_dir.mkdir(parents=True, exist_ok=True)
-        suffix = f"fixmask{self.fixmask_pct}" if self.model_state == ModelState.FIXMASK else "diff_pruning"
+        
+        suffix = f"fixmask{self.fixmask_pct}" if self.fixmask_state else "diff_pruning"
+        
         filename = f"{self.model_name.split('/')[-1]}-{suffix}-doublediff.pt"
         filepath = output_dir / filename
         torch.save(info_dict, filepath)

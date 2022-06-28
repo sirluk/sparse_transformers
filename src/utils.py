@@ -5,9 +5,14 @@ import torch
 from torch.utils.data import DataLoader
 from transformers import AutoTokenizer
 
-from typing import Union, Optional, List, Tuple, Callable, Dict
+from typing import Union, List, Tuple, Callable, Dict
 
-from src.data_handler import get_data_loader, read_label_file
+from src.data_handler import (
+    get_data_loader_bios,
+    get_data_loader_hatespeech,
+    get_data_loader_pan16,
+    read_label_file
+)
 from src.training_logger import TrainLogger
 from src.metrics import accuracy
 
@@ -50,7 +55,7 @@ def get_device(gpu_id: list) -> List[torch.device]:
 def set_num_epochs_debug(args_obj: argparse.Namespace, num: int = 1) -> argparse.Namespace:
     epoch_args = [n for n in dir(args_obj) if n[:10]=="num_epochs"]
     for epoch_arg in epoch_args:
-        v = min(getattr(args_obj, epoch_arg), 1)
+        v = min(getattr(args_obj, epoch_arg), num)
         setattr(args_obj, epoch_arg, v)
     return args_obj
 
@@ -63,7 +68,15 @@ def set_dir_debug(args_obj: argparse.Namespace) -> argparse.Namespace:
     return args_obj
 
 
-def get_data(args_train: argparse.Namespace, debug: bool = False) -> Tuple[DataLoader, DataLoader, int, int]:
+def get_data(args_train: argparse.Namespace, ds: str, debug: bool = False) -> Tuple[DataLoader, DataLoader, int, int]:
+
+    ds_factory = {
+        "bios": get_data_loader_bios,
+        "pan16": get_data_loader_pan16,
+        "hatespeech": get_data_loader_hatespeech
+    }
+    get_data_loader = ds_factory[ds]
+
     num_labels = get_num_labels(args_train.labels_task_path)
     num_labels_protected = get_num_labels(args_train.labels_protected_path)
     tokenizer = AutoTokenizer.from_pretrained(args_train.model_name)
@@ -74,7 +87,6 @@ def get_data(args_train: argparse.Namespace, debug: bool = False) -> Tuple[DataL
         labels_prot_path = args_train.labels_protected_path,
         batch_size = args_train.batch_size,
         max_length = 200,
-        raw = False,
         debug = debug
     )
     val_loader = get_data_loader(
@@ -84,7 +96,6 @@ def get_data(args_train: argparse.Namespace, debug: bool = False) -> Tuple[DataL
         labels_prot_path = args_train.labels_protected_path,
         batch_size = args_train.batch_size,
         max_length = 200,
-        raw = False,
         shuffle = False,
         debug = debug
     )
@@ -98,14 +109,15 @@ def get_logger(baseline: bool, adv: bool, modular: bool, args_train: argparse.Na
         base_name = "adverserial"
     else:
         base_name = "task"
+    
     if baseline:
         base_name = base_name + "_baseline"
     else:
         base_name = base_name + f"_diff_pruning_{args_train.fixmask_pct if args_train.num_epochs_fixmask>0 else 'no_fixmask'}"
+    
     if args_train.bottleneck:
         base_name = base_name + f"_bottleneck_{args_train.bottleneck_dim}"
-    if adv and (not baseline) and (args_train.num_epochs_fixmask>0) and args_train.task_only_l0:
-        base_name = base_name + "_task_only_l0"
+
     if debug:
         base_name = "DEBUG_" + base_name
         
