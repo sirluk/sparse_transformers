@@ -168,9 +168,9 @@ def train_diff_pruning_modular(device, train_loader, val_loader, num_labels, num
         weight_decay = args_train.weight_decay,
         max_grad_norm = args_train.max_grad_norm,
         output_dir = args_train.output_dir,
-        sparse_task = args_train.sparse_task,
-        merged_cutoff = args_train.merged_cutoff,
-        merged_min_pct = args_train.merged_min_pct,
+        sparse_task = args_train.modular_sparse_task,
+        merged_cutoff = args_train.modular_merged_cutoff,
+        merged_min_pct = args_train.modular_merged_min_pct,
         fixmask_pct = args_train.fixmask_pct
     )
     trainer = ModularDiffModel.load_checkpoint(trainer_cp)

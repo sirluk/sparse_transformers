@@ -1,4 +1,5 @@
 import os
+import os
 import math
 from tqdm import trange, tqdm
 from pathlib import Path
@@ -9,13 +10,13 @@ from transformers import get_linear_schedule_with_warmup
 
 from typing import Union, Callable, Dict, Optional
 
-from src.models.model_heads import SwitchHead, AdvHead, ClfHead
-from src.models.model_base import BasePruningModel
+from src.models.model_heads import ClfHead, AdvHead
+from src.models.model_base import BasePruningModel, ModelState
 from src.training_logger import TrainLogger
 from src.utils import dict_to_device
 
 
-class ModularDiffModel(BasePruningModel):
+class AdvDiffModel(BasePruningModel):
 
     def __init__(
         self,
@@ -27,13 +28,12 @@ class ModularDiffModel(BasePruningModel):
         adv_dropout: float = .3,
         adv_n_hidden: int = 1,
         adv_count: int = 5,
-        adv_task_head: bool = True,
         bottleneck: bool = False,
         bottleneck_dim: Optional[int] = None,
         bottleneck_dropout: Optional[float] = None,
         **kwargs
     ):
-        super().__init__(model_name, **kwargs)
+        super().__init__(model_name, **kwargs)       
 
         self.num_labels_task = num_labels_task
         self.num_labels_protected = num_labels_protected
@@ -42,25 +42,21 @@ class ModularDiffModel(BasePruningModel):
         self.adv_dropout = adv_dropout
         self.adv_n_hidden = adv_n_hidden
         self.adv_count = adv_count
-        self.adv_task_head = adv_task_head
         self.has_bottleneck = bottleneck
         self.bottleneck_dim = bottleneck_dim
         self.bottleneck_dropout = bottleneck_dropout
 
         # bottleneck layer
         if self.has_bottleneck:
-            self.bottleneck = SwitchHead(True, ClfHead, self.hidden_size, bottleneck_dim, dropout=bottleneck_dropout)
+            self.bottleneck = ClfHead(self.hidden_size, bottleneck_dim, dropout=bottleneck_dropout)
             self.in_size_heads = bottleneck_dim
         else:
-            self.bottleneck = SwitchHead(True, torch.nn.Identity)
+            self.bottleneck = torch.nn.Identity()
             self.in_size_heads = self.hidden_size
 
         # heads
-        self.task_head = SwitchHead(adv_task_head, ClfHead, [self.in_size_heads]*(task_n_hidden+1), num_labels_task, dropout=task_dropout)
+        self.task_head = ClfHead([self.in_size_heads]*(task_n_hidden+1), num_labels_task, dropout=task_dropout)
         self.adv_head = AdvHead(adv_count, hid_sizes=[self.in_size_heads]*(adv_n_hidden+1), num_labels=num_labels_protected, dropout=adv_dropout)
-
-        self.sparse_task = True
-        self.set_debiased(False)
 
     def _forward(self, **x) -> torch.Tensor:
         hidden = super()._forward(**x)
@@ -70,7 +66,7 @@ class ModularDiffModel(BasePruningModel):
         return self.task_head(self._forward(**x))
 
     def forward_protected(self, **x) -> torch.Tensor:
-        return self.adv_head(self._forward(**x))
+        return self.adv_head(self._forward(**x)) 
 
     def fit(
         self,
@@ -102,17 +98,14 @@ class ModularDiffModel(BasePruningModel):
         weight_decay: float,
         max_grad_norm: float,
         output_dir: Union[str, os.PathLike],
-        sparse_task: bool,
-        merged_cutoff: bool,
-        merged_min_pct: float,
         fixmask_pct: Optional[float] = None
     ) -> None:
 
-        self.sparse_task = sparse_task
+        assert 0 <= adv_lambda <= 1, "adv_lambda needs to be in range [0,1]"
 
         self.global_step = 0
-        num_epochs_finetune += num_epochs_warmup
-        num_epochs_total = num_epochs_finetune + num_epochs_fixmask
+        num_epochs_total = num_epochs_warmup + num_epochs_finetune + num_epochs_fixmask
+        train_steps_warmup = len(train_loader) * num_epochs_warmup
         train_steps_finetune = len(train_loader) * num_epochs_finetune
         train_steps_fixmask = len(train_loader) * num_epochs_fixmask
 
@@ -122,19 +115,19 @@ class ModularDiffModel(BasePruningModel):
 
         if not self.parametrized:
             self._add_diff_parametrizations(
-                n_parametrizations = 1 + sparse_task,
-                p_requires_grad = not sparse_task,
+                n_parametrizations = 1,
+                p_requires_grad = False,
                 alpha_init = alpha_init,
                 concrete_lower = concrete_lower,
                 concrete_upper = concrete_upper,
                 structured = structured_diff_pruning
             )
         else:
-            assert self.n_parametrizations == 1 + sparse_task, f"model has been trained with sparse_task={sparse_task}"
             assert self.finetune_state or (self.fixmask_state and num_epochs_finetune==0), "model is in fixmask state but num_epochs_fintune>0"
 
         self._init_optimizer_and_schedule(
-            train_steps_finetune,
+            train_steps_finetune if not num_epochs_warmup else train_steps_warmup,
+            min(adv_lambda, num_epochs_warmup>0),
             learning_rate,
             learning_rate_task_head,
             learning_rate_adv_head,
@@ -149,21 +142,25 @@ class ModularDiffModel(BasePruningModel):
 
         train_iterator = trange(num_epochs_total, desc=train_str.format(0, self.model_state, ""), leave=False, position=0)
         for epoch in train_iterator:
-            if epoch<num_epochs_warmup:
-                _adv_lambda = 0.
-            else:
-                _adv_lambda = adv_lambda
 
-            # switch to fixed mask training
-            if epoch == num_epochs_finetune:
-                self._finetune_to_fixmask(
-                    fixmask_pct,
-                    n_parametrizations = (1 + sparse_task),
-                    merged_cutoff = merged_cutoff,
-                    merged_min_pct = merged_min_pct
+            if num_epochs_warmup and (epoch == num_epochs_warmup):
+                self._init_optimizer_and_schedule(
+                    train_steps_finetune,
+                    adv_lambda,
+                    learning_rate,
+                    learning_rate_task_head,
+                    learning_rate_adv_head,
+                    learning_rate_alpha,
+                    learning_rate_bottleneck,
+                    weight_decay,
+                    optimizer_warmup_steps
                 )
+            # switch to fixed mask training
+            elif epoch == (num_epochs_warmup + num_epochs_finetune):
+                self._finetune_to_fixmask(fixmask_pct)
                 self._init_optimizer_and_schedule(
                     train_steps_fixmask,
+                    adv_lambda,
                     learning_rate,
                     learning_rate_task_head,
                     learning_rate_adv_head,
@@ -180,7 +177,7 @@ class ModularDiffModel(BasePruningModel):
                 log_ratio,
                 max_grad_norm,
                 loss_fn_protected,
-                _adv_lambda,
+                adv_lambda,
                 concrete_samples
             )
 
@@ -190,37 +187,24 @@ class ModularDiffModel(BasePruningModel):
                 pred_fn,
                 metrics
             )
-            logger.validation_loss(epoch, result, "task")
-
-            result_debiased = self.evaluate(
-                val_loader,
-                loss_fn,
-                pred_fn,
-                metrics,
-                debiased=True
-            )
-            logger.validation_loss(epoch, result_debiased, suffix="task_debiased")
+            logger.validation_loss(epoch, result, suffix="task_debiased")
 
             result_protected = self.evaluate(
                 val_loader,
                 loss_fn_protected,
                 pred_fn_protected,
                 metrics_protected,
-                predict_prot=True,
-                debiased=True
+                predict_prot=True
             )
             logger.validation_loss(epoch, result_protected, suffix="protected")
 
             # count non zero
-            mask_names = ["task", "adv"]
-            for i, suffix in enumerate(mask_names[(not sparse_task):]):
-                n_p, n_p_zero, n_p_one = self._count_non_zero_params(i)
-                n_p_between = n_p - (n_p_zero + n_p_one)
-                logger.non_zero_params(epoch, n_p, n_p_zero, n_p_between, suffix)
+            n_p, n_p_zero, n_p_one = self._count_non_zero_params()
+            n_p_between = n_p - (n_p_zero + n_p_one)
+            logger.non_zero_params(epoch, n_p, n_p_zero, n_p_between, "adv")
 
             result_str = ", " + ", ".join([
-                str_suffix(result, "_task"),
-                str_suffix(result_debiased, "_task_debiased"),
+                str_suffix(result, "_task_debiased"),
                 str_suffix(result_protected, "_protected")
             ])
             train_iterator.set_description(
@@ -235,9 +219,7 @@ class ModularDiffModel(BasePruningModel):
                     structured_diff_pruning
                 )
 
-        self.set_debiased(True) # make sure debiasing is active at end of training
-
-        print("Final results after " + train_str.format(epoch, self.model_state, result_str))
+        print("Final result after " + train_str.format(epoch, self.model_state, result_str))
 
         return cpt
 
@@ -249,8 +231,7 @@ class ModularDiffModel(BasePruningModel):
         loss_fn: Callable,
         pred_fn: Callable,
         metrics: Dict[str, Callable],
-        predict_prot: bool = False,
-        debiased: bool = False
+        predict_prot: bool = False
     ) -> dict:
         self.eval()
 
@@ -263,14 +244,7 @@ class ModularDiffModel(BasePruningModel):
             label_idx = 1
             forward_fn = lambda x: self(**x)
 
-        if debiased != self._debiased:
-            self.set_debiased(debiased, grad_switch=False)
-            result = self._evaluate(val_loader, forward_fn, loss_fn, pred_fn, metrics, label_idx, desc)
-            self.set_debiased((not debiased), grad_switch=False)
-        else:
-            result = self._evaluate(val_loader, forward_fn, loss_fn, pred_fn, metrics, label_idx, desc)
-
-        return result
+        return self._evaluate(val_loader, forward_fn, loss_fn, pred_fn, metrics, label_idx, desc)
 
 
     def _step(
@@ -287,73 +261,37 @@ class ModularDiffModel(BasePruningModel):
 
         self.train()
 
-        epoch_str = "training - step {}, loss_biased: {:7.5f}, loss_debiased: {:7.5f}"
+        epoch_str = "training - step {}, loss: {:7.5f}, loss l0 pen: {:7.5f}"
         epoch_iterator = tqdm(train_loader, desc=epoch_str.format(0, math.nan, math.nan), leave=False, position=1)
         for step, batch in enumerate(epoch_iterator):
 
             inputs, labels_task, labels_protected = batch
             inputs = dict_to_device(inputs, self.device)
 
+            adv_lambda_abs = adv_lambda / (1 - adv_lambda)
             concrete_samples = concrete_samples if self.finetune_state else 1
 
-            ##################################################
-            # START STEP TASK
-            self.set_debiased(False)
-
-            losses_biased = torch.zeros((3,))
-            for _ in range(concrete_samples):
-            
-                loss = 0.
-
-                outputs = self(**inputs)
-                loss_task = loss_fn(outputs, labels_task.to(self.device))
-                loss += loss_task
-
-                if self.finetune_state and self.sparse_task:
-                    loss_l0 = self._get_sparsity_pen(log_ratio, 0)
-                    loss += loss_l0
-                else:
-                    loss_l0 = torch.tensor(0.)
-
-                losses_biased += torch.tensor([loss, loss_task, loss_l0]).detach()
-
-                loss /= concrete_samples
-                loss.backward()
-
-            torch.nn.utils.clip_grad_norm_(self.parameters(), max_grad_norm)
-
-            self.optimizer.step()
-            self.zero_grad()
-            losses_biased /= concrete_samples
-
-            # END STEP TASK
-            ##################################################
-
-            ##################################################
-            # START STEP DEBIAS
-            self.set_debiased(True)
-
-            losses_debiased = torch.zeros((4,))
+            losses = torch.zeros((4,))
             for _ in range(concrete_samples):
 
                 loss = 0.
 
                 hidden = self._forward(**inputs)
                 outputs_task = self.task_head(hidden)
-                loss_task_adv = loss_fn(outputs_task, labels_task.to(self.device))
-                loss += loss_task_adv
-
-                outputs_protected = self.adv_head.forward_reverse(hidden, lmbda=adv_lambda)
+                loss_task = loss_fn(outputs_task, labels_task.to(self.device))
+                loss += loss_task
+                
+                outputs_protected = self.adv_head.forward_reverse(hidden, lmbda = adv_lambda_abs)
                 loss_protected = self._get_mean_loss(outputs_protected, labels_protected.to(self.device), loss_fn_protected)
                 loss += loss_protected
 
                 if self.finetune_state:
-                    loss_l0_adv = self._get_sparsity_pen(log_ratio, int(self.sparse_task))
-                    loss += loss_l0_adv
-                else:
-                    loss_l0_adv = torch.tensor(0.)
+                    loss_l0 = self._get_sparsity_pen(log_ratio, 0)
+                    loss += loss_l0
+                else: 
+                    loss_l0 = torch.tensor(0.)
 
-                losses_debiased += torch.tensor([loss, loss_task_adv, loss_protected, loss_l0_adv]).detach()
+                losses += torch.tensor([loss, loss_task, loss_protected, loss_l0]).detach()
 
                 loss /= concrete_samples
                 loss.backward()
@@ -361,48 +299,22 @@ class ModularDiffModel(BasePruningModel):
             torch.nn.utils.clip_grad_norm_(self.parameters(), max_grad_norm)
 
             self.optimizer.step()
-            self.zero_grad()
-            losses_debiased /= concrete_samples
-
-            # END STEP DEBIAS
-            ##################################################
-
             # self.scheduler.step()
+            self.zero_grad()
 
-            losses_dict = {
-                "total": losses_biased[0],
-                "task": losses_biased[1],
-                "l0": losses_biased[2],
-                "total_adv": losses_debiased[0],
-                "task_adv": losses_debiased[1],
-                "protected": losses_debiased[2],
-                "l0_adv": losses_debiased[3]
-            }
+            losses /= concrete_samples
+            losses_dict = dict(zip(["total_adv", "task_adv", "protected", "l0_adv"], losses.tolist()))
             logger.step_loss(self.global_step, losses_dict)
 
-            epoch_iterator.set_description(epoch_str.format(step, losses_biased[0], losses_debiased[0]), refresh=True)
+            epoch_iterator.set_description(epoch_str.format(step, losses[0], losses[3]), refresh=True)
 
-            self.global_step += 1
-
-
-    def set_debiased(self, debiased: bool, grad_switch: bool = True) -> None:
-        self._activate_parametrizations(debiased, int(self.sparse_task))
-        self.bottleneck.switch_head(not debiased)
-        if self.adv_task_head:
-            self.task_head.switch_head(not debiased)
-        if grad_switch:
-            if not self.adv_task_head:
-                self.task_head.freeze_parameters(first=True, frozen=debiased)
-            if self.sparse_task:
-                self._freeze_parametrizations(debiased, 0)
-            else:
-                self._freeze_original_parameters(debiased)
-        self._debiased = debiased
+            self.global_step += 1     
 
 
     def _init_optimizer_and_schedule(
         self,
         num_training_steps: int,
+        adv_lambda: float,
         learning_rate: float,
         learning_rate_task_head: float,
         learning_rate_adv_head: float,
@@ -411,6 +323,13 @@ class ModularDiffModel(BasePruningModel):
         weight_decay: float = 0.0,
         num_warmup_steps: int = 0
     ) -> None:
+
+        scaling_factor = (1 - adv_lambda)
+        learning_rate_bottleneck *= scaling_factor
+        learning_rate *= scaling_factor
+        if self.finetune_state:
+            learning_rate_alpha *= scaling_factor
+            learning_rate_alpha /= (2 - adv_lambda) # because there is an additonal L0 loss
 
         optimizer_param_groups = [
             {
@@ -428,17 +347,8 @@ class ModularDiffModel(BasePruningModel):
         ]
 
         optimizer_param_groups.extend(
-            self._get_diff_param_groups(learning_rate, weight_decay, learning_rate_alpha)
+            self._get_diff_param_groups(learning_rate, weight_decay, learning_rate_alpha, 0)
         )
-
-        if not self.sparse_task:
-            optimizer_param_groups.append(
-                {
-                    "params": [p for n,p in self.encoder.named_parameters() if n[-9:] == f".original"],
-                    "lr": learning_rate,
-                    "weight_decay": weight_decay
-                }                
-            )
 
         self.optimizer = AdamW(optimizer_param_groups, betas=(0.9, 0.999), eps=1e-08)
 
@@ -463,44 +373,35 @@ class ModularDiffModel(BasePruningModel):
             "adv_dropout": self.adv_dropout,
             "adv_n_hidden": self.adv_n_hidden,
             "adv_count": self.adv_count,
-            "adv_task_head": self.adv_task_head,
             "bottleneck": self.has_bottleneck,
             "bottleneck_dim": self.bottleneck_dim,
             "bottleneck_dropout": self.bottleneck_dropout,
-            "fixmask": self.fixmask_state,
+            "model_state": self.model_state,
             "encoder_state_dict": self.encoder_module.state_dict(),
             "bottleneck_state_dict": self.bottleneck.state_dict(),
             "task_head_state_dict": self.task_head.state_dict(),
             "adv_head_state_dict": self.adv_head.state_dict(),
             "concrete_lower": concrete_lower,
             "concrete_upper": concrete_upper,
-            "structured_diff_pruning": structured_diff_pruning,
-            "sparse_task": self.sparse_task
+            "structured_diff_pruning": structured_diff_pruning
         }
 
         output_dir = Path(output_dir)
         output_dir.mkdir(parents=True, exist_ok=True)
 
         suffix = f"fixmask{self.fixmask_pct}" if self.fixmask_state else "diff_pruning"
-        
-        filename_parts = [
-            self.model_name.split('/')[-1],
-            f"fixmask{self.fixmask_pct}" if self.fixmask_state else "diff_pruning",
-            "modular",
-            'sparse_task' if self.sparse_task else None,
-            'merged_head' if not self.adv_task_head else None
-        ]
-        filename = "-".join([x for x in filename_parts if x is not None]) + ".pt"
+
+        filename = f"{self.model_name.split('/')[-1]}-{suffix}-adv.pt"
         filepath = output_dir / filename
         torch.save(info_dict, filepath)
         return filepath
+
 
     @classmethod
     def load_checkpoint(
         cls,
         filepath: Union[str, os.PathLike],
         remove_parametrizations: bool = False,
-        debiased: bool = True,
         map_location: Union[str, torch.device] = torch.device('cpu')
     ) -> torch.nn.Module:
         info_dict = torch.load(filepath, map_location=map_location)
@@ -514,16 +415,15 @@ class ModularDiffModel(BasePruningModel):
             info_dict['adv_dropout'],
             info_dict['adv_n_hidden'],
             info_dict['adv_count'],
-            info_dict['adv_task_head'],
             info_dict['bottleneck'],
             info_dict['bottleneck_dim'],
             info_dict['bottleneck_dropout']
         )
 
         cls_instance._add_diff_parametrizations(
-            n_parametrizations = 1 + info_dict["sparse_task"],
-            p_requires_grad = not info_dict["sparse_task"],
-            fixmask_init = info_dict["fixmask"],
+            n_parametrizations = 1,
+            p_requires_grad = False,
+            fixmask_init = (info_dict["model_state"] == ModelState.FIXMASK),
             alpha_init = 5, # standard value for alpha init, not important here as it will be overwritten by checkpoint
             concrete_lower = info_dict['concrete_lower'],
             concrete_upper = info_dict['concrete_upper'],
@@ -535,12 +435,11 @@ class ModularDiffModel(BasePruningModel):
         cls_instance.task_head.load_state_dict(info_dict['task_head_state_dict'])
         cls_instance.adv_head.load_state_dict(info_dict['adv_head_state_dict'])
 
-        cls_instance.set_debiased(debiased)
-
         if remove_parametrizations:
             cls_instance._remove_parametrizations()
 
         cls_instance.eval()
 
         return cls_instance
+
 

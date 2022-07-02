@@ -52,12 +52,13 @@ train_config_diff_pruning:
     optimizer_warmup_steps: 0
     sparsity_pen: 1.25e-7
     max_grad_norm: 1.0
-    fixmask_pct: 0.025
+    fixmask_pct: 0.1
     logging_step: 5
     cooldown: 5
-    sparse_task: True
-    merged_cutoff: False
-    merged_min_pct: 0.01
+    modular_sparse_task: True
+    modular_adv_task_head: True
+    modular_merged_cutoff: False
+    modular_merged_min_pct: 0.01
 train_config_baseline:
     bottleneck: False
     num_epochs_warmup: 0
@@ -79,7 +80,7 @@ train_config_baseline:
     logging_step: 5
     cooldown: 5
 adv_attack:
-    num_epochs: 100
+    num_epochs: 40
     learning_rate: 1e-4
     adv_n_hidden: 1
     adv_count: 5

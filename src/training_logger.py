@@ -101,9 +101,10 @@ class TrainLogger:
         k: Optional[str] = None,
         weights: Optional[List] = None,
         binary: bool = False,
-        suffix: str = ''
+        suffix: str = '',
+        log_best: bool = True
     ):
-        self.log_best(result, ascending, k, suffix)
+        if log_best: self.log_best(result, ascending, k, suffix)
 
         if k is not None:
             result = {k: result[k]}

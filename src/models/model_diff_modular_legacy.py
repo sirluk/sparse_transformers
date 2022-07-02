@@ -9,7 +9,7 @@ from transformers import get_linear_schedule_with_warmup
 
 from typing import Union, Callable, Dict, Optional
 
-from src.models.model_heads import SwitchHead, AdvHead, ClfHead
+from src.models.model_heads import ClfHead, AdvHead
 from src.models.model_base import BasePruningModel
 from src.training_logger import TrainLogger
 from src.utils import dict_to_device
@@ -27,7 +27,6 @@ class ModularDiffModel(BasePruningModel):
         adv_dropout: float = .3,
         adv_n_hidden: int = 1,
         adv_count: int = 5,
-        adv_task_head: bool = True,
         bottleneck: bool = False,
         bottleneck_dim: Optional[int] = None,
         bottleneck_dropout: Optional[float] = None,
@@ -42,21 +41,23 @@ class ModularDiffModel(BasePruningModel):
         self.adv_dropout = adv_dropout
         self.adv_n_hidden = adv_n_hidden
         self.adv_count = adv_count
-        self.adv_task_head = adv_task_head
         self.has_bottleneck = bottleneck
         self.bottleneck_dim = bottleneck_dim
         self.bottleneck_dropout = bottleneck_dropout
 
         # bottleneck layer
         if self.has_bottleneck:
-            self.bottleneck = SwitchHead(True, ClfHead, self.hidden_size, bottleneck_dim, dropout=bottleneck_dropout)
+            self.bottleneck_biased = ClfHead(self.hidden_size, bottleneck_dim, dropout=bottleneck_dropout)
+            self.bottleneck_debiased = ClfHead(self.hidden_size, bottleneck_dim, dropout=bottleneck_dropout)
             self.in_size_heads = bottleneck_dim
         else:
-            self.bottleneck = SwitchHead(True, torch.nn.Identity)
+            self.bottleneck_biased = torch.nn.Identity()
+            self.bottleneck_debiased = torch.nn.Identity()
             self.in_size_heads = self.hidden_size
 
         # heads
-        self.task_head = SwitchHead(adv_task_head, ClfHead, [self.in_size_heads]*(task_n_hidden+1), num_labels_task, dropout=task_dropout)
+        self.task_head_biased = ClfHead([self.in_size_heads]*(task_n_hidden+1), num_labels_task, dropout=task_dropout)
+        self.task_head_debiased = ClfHead([self.in_size_heads]*(task_n_hidden+1), num_labels_task, dropout=task_dropout)
         self.adv_head = AdvHead(adv_count, hid_sizes=[self.in_size_heads]*(adv_n_hidden+1), num_labels=num_labels_protected, dropout=adv_dropout)
 
         self.sparse_task = True
@@ -387,12 +388,13 @@ class ModularDiffModel(BasePruningModel):
 
     def set_debiased(self, debiased: bool, grad_switch: bool = True) -> None:
         self._activate_parametrizations(debiased, int(self.sparse_task))
-        self.bottleneck.switch_head(not debiased)
-        if self.adv_task_head:
-            self.task_head.switch_head(not debiased)
+        if debiased:
+            self.bottleneck = self.bottleneck_debiased
+            self.task_head = self.task_head_debiased
+        else:
+            self.bottleneck = self.bottleneck_biased
+            self.task_head = self.task_head_biased
         if grad_switch:
-            if not self.adv_task_head:
-                self.task_head.freeze_parameters(first=True, frozen=debiased)
             if self.sparse_task:
                 self._freeze_parametrizations(debiased, 0)
             else:
@@ -414,11 +416,19 @@ class ModularDiffModel(BasePruningModel):
 
         optimizer_param_groups = [
             {
-                "params": self.bottleneck.parameters(),
+                "params": self.bottleneck_biased.parameters(),
                 "lr": learning_rate_bottleneck
             },
             {
-                "params": self.task_head.parameters(),
+                "params": self.bottleneck_debiased.parameters(),
+                "lr": learning_rate_bottleneck
+            },
+            {
+                "params": self.task_head_biased.parameters(),
+                "lr": learning_rate_task_head
+            },
+            {
+                "params": self.task_head_debiased.parameters(),
                 "lr": learning_rate_task_head
             },
             {
@@ -463,14 +473,15 @@ class ModularDiffModel(BasePruningModel):
             "adv_dropout": self.adv_dropout,
             "adv_n_hidden": self.adv_n_hidden,
             "adv_count": self.adv_count,
-            "adv_task_head": self.adv_task_head,
             "bottleneck": self.has_bottleneck,
             "bottleneck_dim": self.bottleneck_dim,
             "bottleneck_dropout": self.bottleneck_dropout,
             "fixmask": self.fixmask_state,
             "encoder_state_dict": self.encoder_module.state_dict(),
-            "bottleneck_state_dict": self.bottleneck.state_dict(),
-            "task_head_state_dict": self.task_head.state_dict(),
+            "bottleneck_biased_state_dict": self.bottleneck_biased.state_dict(),
+            "bottleneck_debiased_state_dict": self.bottleneck_debiased.state_dict(),
+            "task_head_biased_state_dict": self.task_head_biased.state_dict(),
+            "task_head_debiased_state_dict": self.task_head_debiased.state_dict(),
             "adv_head_state_dict": self.adv_head.state_dict(),
             "concrete_lower": concrete_lower,
             "concrete_upper": concrete_upper,
@@ -482,15 +493,8 @@ class ModularDiffModel(BasePruningModel):
         output_dir.mkdir(parents=True, exist_ok=True)
 
         suffix = f"fixmask{self.fixmask_pct}" if self.fixmask_state else "diff_pruning"
-        
-        filename_parts = [
-            self.model_name.split('/')[-1],
-            f"fixmask{self.fixmask_pct}" if self.fixmask_state else "diff_pruning",
-            "modular",
-            'sparse_task' if self.sparse_task else None,
-            'merged_head' if not self.adv_task_head else None
-        ]
-        filename = "-".join([x for x in filename_parts if x is not None]) + ".pt"
+
+        filename = f"{self.model_name.split('/')[-1]}-{suffix}-modular{'-sparse_task' if self.sparse_task else ''}.pt"
         filepath = output_dir / filename
         torch.save(info_dict, filepath)
         return filepath
@@ -514,7 +518,6 @@ class ModularDiffModel(BasePruningModel):
             info_dict['adv_dropout'],
             info_dict['adv_n_hidden'],
             info_dict['adv_count'],
-            info_dict['adv_task_head'],
             info_dict['bottleneck'],
             info_dict['bottleneck_dim'],
             info_dict['bottleneck_dropout']
@@ -531,8 +534,10 @@ class ModularDiffModel(BasePruningModel):
         )
 
         cls_instance.encoder.load_state_dict(info_dict['encoder_state_dict'])
-        cls_instance.bottleneck.load_state_dict(info_dict['bottleneck_state_dict'])
-        cls_instance.task_head.load_state_dict(info_dict['task_head_state_dict'])
+        cls_instance.bottleneck_biased.load_state_dict(info_dict['bottleneck_biased_state_dict'])
+        cls_instance.bottleneck_debiased.load_state_dict(info_dict['bottleneck_debiased_state_dict'])
+        cls_instance.task_head_biased.load_state_dict(info_dict['task_head_biased_state_dict'])
+        cls_instance.task_head_debiased.load_state_dict(info_dict['task_head_debiased_state_dict'])
         cls_instance.adv_head.load_state_dict(info_dict['adv_head_state_dict'])
 
         cls_instance.set_debiased(debiased)

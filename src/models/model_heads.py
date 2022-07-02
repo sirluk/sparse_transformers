@@ -4,7 +4,20 @@ from torch.autograd import Function
 from typing import Union
 
 
-class ReverseLayerF(Function):
+# class GRL(Function):
+#     # https://discuss.pytorch.org/t/solved-reverse-gradients-in-backward-pass/3589/2
+#     @staticmethod
+#     def forward(ctx, input_, lmbda):
+#         ctx.lmbda = lmbda
+#         return input_.view_as(input_)
+
+#     @staticmethod
+#     def backward(ctx, grad_output):
+#         grad_input = grad_output.neg() * ctx.lmbda
+#         return grad_input, None
+
+
+class GradScaler(Function):
     # https://discuss.pytorch.org/t/solved-reverse-gradients-in-backward-pass/3589/2
     @staticmethod
     def forward(ctx, input_, lmbda):
@@ -13,7 +26,7 @@ class ReverseLayerF(Function):
 
     @staticmethod
     def backward(ctx, grad_output):
-        grad_input = grad_output.neg() * ctx.lmbda
+        grad_input = grad_output * ctx.lmbda
         return grad_input, None
 
 
@@ -76,9 +89,63 @@ class AdvHead(nn.Module):
         return out
 
     def forward_reverse(self, x, lmbda = 1.):
-        x_ = ReverseLayerF.apply(x, lmbda)
+        lmbda *= -1
+        x_ = GradScaler.apply(x, lmbda)
         return self(x_)
 
     def reset_parameters(self):
         for head in self.heads:
             head.reset_parameters()
+
+
+class AdvHeadWrapper(nn.Module):
+    def __init__(self, adv_heads: list):
+        super().__init__()
+        self.adv_heads = nn.ModuleList(adv_heads)
+
+    def forward(self, x):
+        out = []
+        for adv_head in self.adv_heads:
+            out.extend(adv_head(x))
+        return out
+
+    def forward_reverse(self, x, lmbda = 1.):
+        out_rev = []
+        for adv_head in self.adv_heads:
+            out_rev.extend(adv_head.forward_reverse(x, lmbda))
+        return out_rev
+
+    def reset_parameters(self):
+        for adv_head in self.adv_heads:
+            adv_head.reset_parameters()
+
+
+class SwitchHead(nn.Module):
+    def __init__(self, switch: bool, head_cls: nn.Module, *args, **kwargs):
+        super().__init__()
+        self.switch = switch
+        self.active_head_idx = 0
+
+        self.heads = nn.ModuleList()
+        for i in range(switch+1):
+            self.heads.append(head_cls(*args, **kwargs))
+
+    def switch_head(self, first: bool):
+        self.assert_switch(first)
+        self.activate_head_idx = bool(not first)
+
+    def freeze_parameters(self, first: bool, frozen: bool):
+        self.assert_switch(first)
+        for p in self.heads[not first].parameters():
+            p.requires_grad = not frozen
+
+    def forward(self, x):
+        return self.heads[self.active_head_idx](x)
+
+    def forward_scaled(self, x):
+        x_ = GradScaler.apply(x, len(self.heads))
+        out = self(x_)
+        return GradScaler.apply(out, 1/len(self.heads))
+
+    def assert_switch(self, first: bool):
+        assert first<len(self.heads), "second head was selected but len(self.heads) is 1"

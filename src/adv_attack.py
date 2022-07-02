@@ -112,7 +112,7 @@ def adv_attack(
             train_str.format(epoch, result_str(result)), refresh=True
         )
 
-        if logger.is_best(result, ascending=False, k="loss", binary=True, suffix="adv_attack"):
+        if logger.is_best(result, ascending=False, k="loss", binary=True, suffix="adv_attack", log_best=False):
             best_epoch = epoch
             performance_decrease_counter = 0
         else:

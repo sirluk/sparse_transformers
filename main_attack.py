@@ -48,9 +48,13 @@ def main():
     train_loader, eval_loader, num_labels, num_labels_protected = get_data(args_train, ds=base_args.ds, debug=base_args.debug)
 
     ### DEFINE MANUALLY
-    cp_dir = "/share/home/lukash/checkpoints_bert_L4/seed0"
-    cp = "bert_uncased_L-4_H-256_A-4-fixmask0.1-modular.pt"
-    model_cls = ModularDiffModel
+    cp_dir = "/share/home/lukash/checkpoints_bert_L4/seed1"
+    # cp = "bert_uncased_L-4_H-256_A-4-fixmask0.1-modular.pt"
+    # cp = "bert_uncased_L-4_H-256_A-4-task_baseline.pt"
+    cp = "bert_uncased_L-4_H-256_A-4-fixmask0.05-task.pt"
+    # cp = "bert_uncased_L-4_H-256_A-4-fixmask0.1-adv.pt"
+    # cp = "bert_uncased_L-4_H-256_A-4-fixmask0.1-modular-sparse_task.pt"
+    model_cls = TaskDiffModel
     ### DEFINE MANUALLY
 
     trainer = model_cls.load_checkpoint(f"{cp_dir}/{cp}")

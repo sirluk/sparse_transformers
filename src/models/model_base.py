@@ -227,49 +227,56 @@ class BasePruningModel(BaseModel):
 
 
     @torch.no_grad()
-    def _count_non_zero_params(self, idx: Optional[int] = None) -> Tuple[int, int, int]:
+    def _count_non_zero_params(self, *args, **kwargs) -> Tuple[int, int, int]:
         assert self.parametrized, "Function only implemented for diff pruning"
 
-        l = [self._count_non_zero_params_for_module(m, idx) for m in self.get_encoder_base_modules()]
+        l = [self._count_non_zero_params_for_module(m, *args, **kwargs) for m in self.get_encoder_base_modules()]
         return [sum(x) for x in list(zip(*l))]
 
 
     @torch.no_grad()
-    def _count_non_zero_params_per_layer(self, idx: Optional[int] = None) -> Dict[int, Tuple[int, int, int]]:
+    def _count_non_zero_params_per_layer(self, *args, **kwargs) -> Dict[int, Tuple[int, int, int]]:
         assert self.parametrized, "Function only implemented for diff pruning"
 
         t = torch.zeros((self.total_layers, 3), dtype=int)
         for module_name, base_module in self.get_encoder_base_modules(return_names=True):
             layer_idx = self.get_layer_idx_from_module(module_name)
-            counts = self._count_non_zero_params_for_module(base_module, idx)
+            counts = self._count_non_zero_params_for_module(base_module, *args, **kwargs)
             t[layer_idx] += torch.tensor(counts)
         return {i:v.tolist() for i,v in enumerate(t)}
 
 
     @torch.no_grad()
-    def _count_non_zero_params_for_module(self, m: torch.nn.Module, idx: Optional[int] = None) -> Tuple[int, int, int]:
-        
-        def count_fn(par):
-            if isinstance(par, DiffWeightFixmask):
-                n_p = par.mask.numel()
-                n_p_zero = (~par.mask).sum()
+    def _count_non_zero_params_for_module(self, m: torch.nn.Module, idx: Optional[int] = None, merged: bool = False) -> Tuple[int, int, int]:
+
+        def count_fn(p, binary: bool):
+            if binary:
+                p = p.bool()
+                n_p = p.numel()
+                n_p_zero = (~p).sum()
                 n_p_one = (n_p - n_p_zero)
             else:
-                z = par.z.detach()
-                n_p = z.numel()
-                n_p_zero = (z == 0.).sum()
-                n_p_one = (z == 1.).sum()
+                n_p = p.numel()
+                n_p_zero = (p == 0.).sum()
+                n_p_one = (p == 1.).sum()
             return torch.tensor([n_p, n_p_zero, n_p_one])
 
         assert hasattr(m, "parametrizations"), "module has no parametrizations"
         p_counts = torch.zeros((3,), dtype=int)
         with self.deterministic():
             for n, par_list in list(m.parametrizations.items()):
-                if idx is None:
-                    for par in par_list:
-                        p_counts += count_fn(par)
+                if merged:
+                    if isinstance(par_list[0], DiffWeightFixmask):
+                        p = torch.stack([x.mask for x in par_list]).sum(0)
+                    else:
+                        p = torch.stack([(x.z != 0.) for x in par_list]).sum(0)
+                    p_counts += count_fn(p, True)
                 else:
-                    p_counts += count_fn(par_list[idx])                                   
+                    if idx is not None: par_list = [par_list[idx]]
+                    for par in par_list:
+                        p = par.mask if isinstance(par, DiffWeightFixmask) else par.z
+                        p_counts += count_fn(p, p.dtype==torch.bool)
+                               
         return p_counts.tolist()
 
 
