@@ -280,7 +280,7 @@ class BasePruningModel(BaseModel):
         return p_counts.tolist()
 
 
-    def _remove_parametrization(self) -> None:
+    def _remove_parametrizations(self) -> None:
         self._freeze_parametrizations(True)
         for module in self.get_encoder_base_modules():
             try:
