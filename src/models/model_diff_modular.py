@@ -295,15 +295,15 @@ class ModularDiffModel(BasePruningModel):
             inputs = dict_to_device(inputs, self.device)
 
             concrete_samples = concrete_samples if self.finetune_state else 1
+            concrete_samples_task = concrete_samples if self.sparse_task else 1
 
             ##################################################
             # START STEP TASK
             self.set_debiased(False)
 
+            loss = 0.
             losses_biased = torch.zeros((3,))
-            for _ in range(concrete_samples):
-            
-                loss = 0.
+            for _ in range(concrete_samples_task):
 
                 outputs = self(**inputs)
                 loss_task = loss_fn(outputs, labels_task.to(self.device))
@@ -317,15 +317,16 @@ class ModularDiffModel(BasePruningModel):
 
                 losses_biased += torch.tensor([loss, loss_task, loss_l0]).detach()
 
-                loss /= concrete_samples
-                loss.backward()
+            loss /= concrete_samples_task
+            losses_biased /= concrete_samples_task
+
+            loss.backward()
 
             torch.nn.utils.clip_grad_norm_(self.parameters(), max_grad_norm)
 
             self.optimizer.step()
             self.zero_grad()
-            losses_biased /= concrete_samples
-
+            
             # END STEP TASK
             ##################################################
 
@@ -333,10 +334,9 @@ class ModularDiffModel(BasePruningModel):
             # START STEP DEBIAS
             self.set_debiased(True)
 
+            loss = 0.
             losses_debiased = torch.zeros((4,))
             for _ in range(concrete_samples):
-
-                loss = 0.
 
                 hidden = self._forward(**inputs)
                 outputs_task = self.task_head(hidden)
@@ -355,15 +355,16 @@ class ModularDiffModel(BasePruningModel):
 
                 losses_debiased += torch.tensor([loss, loss_task_adv, loss_protected, loss_l0_adv]).detach()
 
-                loss /= concrete_samples
-                loss.backward()
+            loss /= concrete_samples
+            losses_debiased /= concrete_samples
+
+            loss.backward()
 
             torch.nn.utils.clip_grad_norm_(self.parameters(), max_grad_norm)
 
             self.optimizer.step()
             self.zero_grad()
-            losses_debiased /= concrete_samples
-
+            
             # END STEP DEBIAS
             ##################################################
 
@@ -487,8 +488,8 @@ class ModularDiffModel(BasePruningModel):
             self.model_name.split('/')[-1],
             f"fixmask{self.fixmask_pct}" if self.fixmask_state else "diff_pruning",
             "modular",
-            'sparse_task' if self.sparse_task else None,
-            'merged_head' if not self.adv_task_head else None
+            "sparse_task" if self.sparse_task else None,
+            "merged_head" if not self.adv_task_head else None
         ]
         filename = "-".join([x for x in filename_parts if x is not None]) + ".pt"
         filepath = output_dir / filename

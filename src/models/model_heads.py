@@ -127,16 +127,16 @@ class SwitchHead(nn.Module):
         self.active_head_idx = 0
 
         self.heads = nn.ModuleList()
-        for i in range(switch+1):
+        for _ in range(switch+1):
             self.heads.append(head_cls(*args, **kwargs))
 
     def switch_head(self, first: bool):
         self.assert_switch(first)
-        self.activate_head_idx = bool(not first)
+        self.active_head_idx = int(not first)
 
     def freeze_parameters(self, first: bool, frozen: bool):
         self.assert_switch(first)
-        for p in self.heads[not first].parameters():
+        for p in self.heads[int(not first)].parameters():
             p.requires_grad = not frozen
 
     def forward(self, x):
@@ -148,4 +148,4 @@ class SwitchHead(nn.Module):
         return GradScaler.apply(out, 1/len(self.heads))
 
     def assert_switch(self, first: bool):
-        assert first<len(self.heads), "second head was selected but len(self.heads) is 1"
+        assert not ((not first) == len(self.heads)), "second head was selected but len(self.heads) is 1"

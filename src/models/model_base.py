@@ -115,14 +115,14 @@ class BaseModel(torch.nn.Module):
         return torch.stack(losses).mean()        
 
     def to(self, device: Union[list, Union[str, torch.device]], *args, **kwargs) -> None:
+        self._remove_parallel()
         if isinstance(device, list):
-            asssert_fn = lambda x: x=="cuda" if isinstance(x, str) else x.type=="cuda"
-            assert all([asssert_fn(d) for d in device]), "if list of devices is given, all must be of type 'cuda'"
             super().to(device[0])
             if len(device)>1:
+                asssert_fn = lambda x: x=="cuda" if isinstance(x, str) else x.type=="cuda"
+                assert all([asssert_fn(d) for d in device]), "if list of devices is given, all must be of type 'cuda'"
                 self.encoder = torch.nn.DataParallel(self.encoder, device_ids=device)
         else:
-            self._remove_parallel()
             super().to(device)
 
     def cpu(self):

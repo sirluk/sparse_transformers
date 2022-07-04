@@ -5,7 +5,7 @@ import torch
 from torch.utils.data import DataLoader
 from transformers import AutoTokenizer
 
-from typing import Union, List, Tuple, Callable, Dict
+from typing import Union, List, Tuple, Callable, Dict, Optional
 
 from src.data_handler import (
     get_data_loader_bios,
@@ -43,8 +43,9 @@ def get_num_labels(label_file: Union[str, os.PathLike]) -> int:
     return 1 if num_labels==2 else num_labels
 
 
-def get_device(gpu_id: list) -> List[torch.device]:
-    if torch.cuda.is_available():
+def get_device(gpu: bool, gpu_id: Union[int, list]) -> List[torch.device]:
+    if gpu and torch.cuda.is_available():
+        if isinstance(gpu_id, int): gpu_id = [gpu_id]
         device = [torch.device(f"cuda:{int(i)}") for i in gpu_id]
     else:
         device = [torch.device("cpu")]
@@ -102,39 +103,44 @@ def get_data(args_train: argparse.Namespace, ds: str, debug: bool = False) -> Tu
     return train_loader, val_loader, num_labels, num_labels_protected
 
 
-def get_logger(baseline: bool, adv: bool, modular: bool, args_train: argparse.Namespace, debug: bool = False) -> TrainLogger:
+def get_name_for_run(baseline: bool, adv: bool, modular: bool, args_train: argparse.Namespace, debug: bool = False, seed: Optional[int] = None):
+    run_parts = ["DEBUG" if debug else None]
     if modular:
-        base_name = "modular"
-    elif adv:
-        base_name = "adverserial"
+        run_parts.extend([
+            "modular",
+            "sparse_task" if args_train.modular_sparse_task else None,
+            "merged_head" if not args_train.modular_adv_task_head else None,
+            "merged_cutoff" if args_train.modular_merged_cutoff else None
+    ])
     else:
-        base_name = "task"
-    
+        run_parts.append("adverserial" if adv else "task")
     if baseline:
-        base_name = base_name + "_baseline"
+        run_parts.append("baseline")
     else:
-        base_name = base_name + f"_diff_pruning_{args_train.fixmask_pct if args_train.num_epochs_fixmask>0 else 'no_fixmask'}"
-    
+        run_parts.append(
+            f"diff_pruning_{args_train.fixmask_pct if args_train.num_epochs_fixmask>0 else 'no_fixmask'}"
+        )
     if args_train.bottleneck:
-        base_name = base_name + f"_bottleneck_{args_train.bottleneck_dim}"
-
-    if debug:
-        base_name = "DEBUG_" + base_name
-        
-    log_dir = Path(args_train.log_dir)
-    log_dir.mkdir(parents=True, exist_ok=True)
-    logger_name = "_".join([
-        base_name,
+        run_parts.append(f"bottleneck_{args_train.bottleneck_dim}")
+    run_parts.extend([
         args_train.model_name.split('/')[-1],
         str(args_train.batch_size),
-        str(args_train.learning_rate)
+        str(args_train.learning_rate),
+        f"seed{seed}" if seed is not None else None
     ])
-    train_logger = TrainLogger(
+    run_name = "-".join([x for x in run_parts if x is not None])
+    return run_name
+
+
+def get_logger(baseline: bool, adv: bool, modular: bool, args_train: argparse.Namespace, debug: bool = False, seed: Optional[int] = None) -> TrainLogger:
+    log_dir = Path(args_train.log_dir)
+    log_dir.mkdir(parents=True, exist_ok=True)
+    logger_name = get_name_for_run(baseline, adv, modular, args_train, debug, seed)
+    return TrainLogger(
         log_dir = log_dir,
         logger_name = logger_name,
         logging_step = args_train.logging_step
     )
-    return train_logger
 
 
 def get_callables(num_labels: int) -> Tuple[Callable, Callable, Dict[str, Callable]]:

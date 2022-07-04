@@ -8,6 +8,7 @@ import torch
 from src.models.model_diff_adv import AdvDiffModel
 from src.models.model_diff_task import TaskDiffModel
 from src.models.model_diff_modular import ModularDiffModel
+from src.models.model_diff_modular_legacy import ModularDiffModel as ModularDiffModelLegacy
 from src.models.model_adv import AdvModel
 from src.models.model_task import TaskModel
 from src.training_logger import TrainLogger
@@ -29,12 +30,13 @@ def main():
     parser.add_argument("--gpu_id", nargs="*", type=int, default=[0], help="")
     parser.add_argument("--seed", type=int, default=0, help="torch random seed")
     parser.add_argument("--ds", type=str, default="bios", help="dataset")
+    parser.add_argument("--cpu", type=bool, default=False, help="Run on cpu")
     base_args = parser.parse_args()
 
     torch.manual_seed(base_args.seed)
     print(f"torch.manual_seed({base_args.seed})")
 
-    device = get_device(base_args.gpu_id)
+    device = get_device(not base_args.cpu, base_args.gpu_id)
 
     with open("cfg.yml", "r") as f:
         cfg = yaml.safe_load(f)
@@ -48,13 +50,15 @@ def main():
     train_loader, eval_loader, num_labels, num_labels_protected = get_data(args_train, ds=base_args.ds, debug=base_args.debug)
 
     ### DEFINE MANUALLY
-    cp_dir = "/share/home/lukash/checkpoints_bert_L4/seed1"
-    # cp = "bert_uncased_L-4_H-256_A-4-fixmask0.1-modular.pt"
+    cp_dir = "/share/home/lukash/checkpoints_bert_L4/seed0"
+    # cp_dir = "checkpoints_bios_seed1"
+    # cp = "bert_uncased_L-4_H-256_A-4-fixmask0.1-modular-sparse_task-merged_head.pt"
+    cp = "bert_uncased_L-4_H-256_A-4-fixmask0.1-modular.pt"
     # cp = "bert_uncased_L-4_H-256_A-4-task_baseline.pt"
-    cp = "bert_uncased_L-4_H-256_A-4-fixmask0.05-task.pt"
+    # cp = "bert_uncased_L-4_H-256_A-4-fixmask0.05-task.pt"
     # cp = "bert_uncased_L-4_H-256_A-4-fixmask0.1-adv.pt"
-    # cp = "bert_uncased_L-4_H-256_A-4-fixmask0.1-modular-sparse_task.pt"
-    model_cls = TaskDiffModel
+    # cp = "bert_uncased_L-4_H-256_A-4-fixmask0.1-modular.pt"
+    model_cls = ModularDiffModel
     ### DEFINE MANUALLY
 
     trainer = model_cls.load_checkpoint(f"{cp_dir}/{cp}")
@@ -63,7 +67,8 @@ def main():
     logger_name = "_".join([
         f"only_adv_attack_{cp}",
         str(args_train.batch_size),
-        str(args_train.learning_rate)
+        str(args_train.learning_rate),
+        f"seed{base_args.seed}"
     ])
     train_logger = TrainLogger(
         log_dir = Path(args_train.log_dir),

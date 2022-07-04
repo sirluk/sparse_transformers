@@ -80,6 +80,7 @@ def main():
     parser.add_argument("--gpu_id", nargs="*", type=int, default=[0], help="")
     parser.add_argument("--seed", type=int, default=0, help="torch random seed")
     parser.add_argument("--ds", type=str, default="bios", help="dataset")
+    parser.add_argument("--cpu", type=bool, default=False, help="Run on cpu")
     base_args = parser.parse_args()
 
     torch.manual_seed(base_args.seed)
@@ -96,7 +97,7 @@ def main():
         args_attack = set_num_epochs_debug(args_attack)
         args_train = set_dir_debug(args_train)
 
-    device = get_device(base_args.gpu_id)
+    device = get_device(not base_args.cpu, base_args.gpu_id)
 
     train_loader, val_loader, num_labels, num_labels_protected = get_data(args_train, ds=base_args.ds, debug=base_args.debug)
 
@@ -108,7 +109,8 @@ def main():
         f"bottleneck_{args_train.bottleneck_dim}" if args_train.bottleneck else "",
         args_train.model_name.split('/')[-1],
         str(args_train.batch_size),
-        str(args_train.learning_rate)
+        str(args_train.learning_rate),
+        f"seed{base_args.seed}"
     ] if len(x)>0])
     train_logger = TrainLogger(
         log_dir = log_dir,

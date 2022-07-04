@@ -134,6 +134,7 @@ def train_diff_pruning_modular(device, train_loader, val_loader, num_labels, num
         adv_dropout = args_train.adv_dropout,
         adv_n_hidden = args_train.adv_n_hidden,
         adv_count = args_train.adv_count,
+        adv_task_head = args_train.modular_adv_task_head,
         bottleneck = args_train.bottleneck,
         bottleneck_dim = args_train.bottleneck_dim,
         bottleneck_dropout = args_train.bottleneck_dropout,
@@ -272,6 +273,7 @@ def main():
     parser.add_argument("--gpu_id", nargs="*", type=int, default=[0], help="")
     parser.add_argument("--seed", type=int, default=0, help="torch random seed")
     parser.add_argument("--ds", type=str, default="bios", help="dataset")
+    parser.add_argument("--cpu", type=bool, default=False, help="Run on cpu")
     base_args = parser.parse_args()
 
     torch.manual_seed(base_args.seed)
@@ -289,11 +291,11 @@ def main():
         args_attack = set_num_epochs_debug(args_attack)
         args_train = set_dir_debug(args_train)
 
-    device = get_device(base_args.gpu_id)
+    device = get_device(not base_args.cpu, base_args.gpu_id)
 
     train_loader, val_loader, num_labels, num_labels_protected = get_data(args_train, ds=base_args.ds, debug=base_args.debug)
     
-    train_logger = get_logger(base_args.baseline, base_args.adv, base_args.modular, args_train, base_args.debug)
+    train_logger = get_logger(base_args.baseline, base_args.adv, base_args.modular, args_train, base_args.debug, base_args.seed)
 
     print(f"Running {train_logger.logger_name}")
 

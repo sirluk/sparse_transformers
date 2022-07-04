@@ -509,6 +509,9 @@ class ModularDiffModel(BasePruningModel):
     ) -> torch.nn.Module:
         info_dict = torch.load(filepath, map_location=map_location)
 
+        info_dict['fixmask'] = True
+        info_dict['sparse_task'] = True
+
         cls_instance = cls(
             info_dict['model_name'],
             info_dict['num_labels_task'],
