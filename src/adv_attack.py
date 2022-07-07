@@ -4,12 +4,13 @@ import torch
 from torch import nn
 from torch.optim import AdamW
 from torch.utils.data import DataLoader, TensorDataset
+from transformers import get_linear_schedule_with_warmup
 
 from src.models.model_heads import AdvHead
 from src.training_logger import TrainLogger
 from src.utils import dict_to_device
 
-from typing import Callable, Dict
+from typing import Callable, Dict, Optional
 
 
 @torch.no_grad()
@@ -17,7 +18,8 @@ def get_hidden_dataloader(
     trainer: nn.Module,
     loader: DataLoader,
     shuffle: bool = True,
-    label_idx: int = 2
+    label_idx: int = 2,
+    batch_size: Optional[int] = None
 ):
     trainer.eval()
     hidden_list = []
@@ -28,8 +30,9 @@ def get_hidden_dataloader(
         hidden = trainer._forward(**inputs)
         hidden_list.append(hidden.cpu())
         label_list.append(labels)
+    bs = loader.batch_size if batch_size is None else batch_size
     ds = TensorDataset(torch.cat(hidden_list), torch.cat(label_list))
-    return DataLoader(ds, shuffle=shuffle, batch_size=loader.batch_size, drop_last=False)
+    return DataLoader(ds, shuffle=shuffle, batch_size=bs, drop_last=False)
 
 
 def adv_attack(
@@ -46,7 +49,9 @@ def adv_attack(
     adv_dropout: int,
     num_epochs: int,
     lr: float,
-    cooldown: int
+    batch_size: Optional[int] = None,
+    cooldown: Optional[int] = 5,
+    logger_suffix: str = "adv_attack"
 ):
 
     logger.reset()
@@ -60,12 +65,12 @@ def adv_attack(
     adv_head.to(trainer.device)
 
     optimizer = AdamW(adv_head.parameters(), lr=lr)
+    # scheduler = get_linear_schedule_with_warmup(
+    #     optimizer, num_warmup_steps=0, num_training_steps=len(train_loader) * num_epochs
+    # )
 
-    if hasattr(trainer, "_remove_parametrizations"):
-        trainer._remove_parametrizations()
-
-    train_loader = get_hidden_dataloader(trainer, train_loader)
-    val_loader = get_hidden_dataloader(trainer, val_loader, shuffle=False)
+    train_loader = get_hidden_dataloader(trainer, train_loader, batch_size=batch_size)
+    val_loader = get_hidden_dataloader(trainer, val_loader, shuffle=False, batch_size=batch_size)
 
     global_step = 0
     train_str = "Epoch {}, {}"
@@ -78,19 +83,19 @@ def adv_attack(
         epoch_str = "training - step {}, loss: {:7.5f}"
         epoch_iterator = tqdm(train_loader, desc=epoch_str.format(0, math.nan), leave=False, position=1)
 
-        for step, batch in enumerate(epoch_iterator):
+        for step, (inputs, labels) in enumerate(epoch_iterator):
 
             adv_head.train()
 
-            inputs, labels = batch
             outputs = adv_head(inputs.to(trainer.device))
             loss = trainer._get_mean_loss(outputs, labels.to(trainer.device), loss_fn)
 
             loss.backward()
             optimizer.step()
+            # scheduler.step()
             adv_head.zero_grad()
 
-            logger.step_loss(global_step, loss.item(), lr=lr, suffix="adv_attack")
+            logger.step_loss(global_step, loss.item(), lr=lr, suffix=logger_suffix)
 
             epoch_iterator.set_description(epoch_str.format(step, loss.item()), refresh=True)
 
@@ -100,19 +105,19 @@ def adv_attack(
         forward_fn = lambda x, adv_head: adv_head(x)
         result = trainer._evaluate(val_loader, forward_fn, loss_fn, pred_fn, metrics, adv_head=adv_head)
 
-        logger.validation_loss(epoch, result, "adv_attack")
+        logger.validation_loss(epoch, result, logger_suffix)
         d = {
             "loss": True,
             "acc": False,
             "balanced_acc": False
         }
-        logger.log_best({k: result[k] for k in d.keys()}, ascending=d.values(), suffix="adv_attack")
+        logger.log_best({k: result[k] for k in d.keys()}, ascending=d.values(), suffix=logger_suffix)
 
         train_iterator.set_description(
             train_str.format(epoch, result_str(result)), refresh=True
         )
 
-        if logger.is_best(result, ascending=False, k="loss", binary=True, suffix="adv_attack", log_best=False):
+        if logger.is_best(result, ascending=False, k="loss", binary=True, suffix=logger_suffix, log_best=False):
             best_epoch = epoch
             performance_decrease_counter = 0
         else:
@@ -126,3 +131,4 @@ def adv_attack(
     print("Adv Attack: Final result after " +  train_str.format(epoch, result_str(result)))
     print("Adv Attack: Best result " +  train_str.format(best_epoch, result_str(logger.best_eval_metric)))
     
+    return adv_head
