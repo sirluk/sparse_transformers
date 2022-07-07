@@ -134,3 +134,17 @@ class DoubleDiffWeightFinetune(nn.Module):
         if tmp_state: self.eval()
         yield
         if tmp_state: self.train()
+
+
+class DeltaWeight(nn.Module):
+
+    def __init__(self, delta_weight: torch.Tensor):
+        super().__init__()
+        self.register_parameter("delta_weight", Parameter(delta_weight))
+        self.active = True
+
+    def forward(self, X):
+        if self.active:
+            return X.detach() + self.delta_weight
+        else:
+            return X
