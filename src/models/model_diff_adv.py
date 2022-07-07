@@ -1,3 +1,4 @@
+from optparse import Option
 import os
 import os
 import math
@@ -98,7 +99,8 @@ class AdvDiffModel(BasePruningModel):
         weight_decay: float,
         max_grad_norm: float,
         output_dir: Union[str, os.PathLike],
-        fixmask_pct: Optional[float] = None
+        fixmask_pct: Optional[float] = None,
+        seed: Optional[int] = None
     ) -> None:
 
         self.global_step = 0
@@ -204,7 +206,8 @@ class AdvDiffModel(BasePruningModel):
                     Path(output_dir),
                     concrete_lower,
                     concrete_upper,
-                    structured_diff_pruning
+                    structured_diff_pruning,
+                    seed
                 )
 
         print("Final result after " + train_str.format(epoch, self.model_state, result_str))
@@ -341,7 +344,8 @@ class AdvDiffModel(BasePruningModel):
         output_dir: Union[str, os.PathLike],
         concrete_lower: float,
         concrete_upper: float,
-        structured_diff_pruning: bool
+        structured_diff_pruning: bool,
+        seed: Optional[None] = None
     ) -> None:
         info_dict = {
             "model_name": self.model_name,
@@ -369,8 +373,8 @@ class AdvDiffModel(BasePruningModel):
         output_dir.mkdir(parents=True, exist_ok=True)
 
         suffix = f"fixmask{self.fixmask_pct}" if self.fixmask_state else "diff_pruning"
-
-        filename = f"{self.model_name.split('/')[-1]}-{suffix}-adv.pt"
+        seed_str = f"-seed{seed}" if seed is not None else ""
+        filename = f"{self.model_name.split('/')[-1]}-adv_{suffix}{seed_str}.pt"
         filepath = output_dir / filename
         torch.save(info_dict, filepath)
         return filepath

@@ -1,3 +1,4 @@
+from optparse import Option
 import os
 import math
 from tqdm import trange, tqdm
@@ -105,7 +106,8 @@ class ModularDiffModel(BasePruningModel):
         sparse_task: bool,
         merged_cutoff: bool,
         merged_min_pct: float,
-        fixmask_pct: Optional[float] = None
+        fixmask_pct: Optional[float] = None,
+        seed: Optional[int] = None
     ) -> None:
 
         self.sparse_task = sparse_task
@@ -232,7 +234,8 @@ class ModularDiffModel(BasePruningModel):
                     Path(output_dir),
                     concrete_lower,
                     concrete_upper,
-                    structured_diff_pruning
+                    structured_diff_pruning,
+                    seed
                 )
 
         self.set_debiased(True) # make sure debiasing is active at end of training
@@ -387,18 +390,23 @@ class ModularDiffModel(BasePruningModel):
 
 
     def set_debiased(self, debiased: bool, grad_switch: bool = True) -> None:
-        self._activate_parametrizations(debiased, int(self.sparse_task))
-        self.bottleneck.switch_head(not debiased)
-        if self.adv_task_head:
-            self.task_head.switch_head(not debiased)
-        if grad_switch:
-            if not self.adv_task_head:
-                self.task_head.freeze_parameters(first=True, frozen=debiased)
-            if self.sparse_task:
-                self._freeze_parametrizations(debiased, 0)
-            else:
-                self._freeze_original_parameters(debiased)
-        self._debiased = debiased
+        try:
+            check = (debiased != self._debiased)
+        except AttributeError:
+            check = True
+        if check:
+            self._activate_parametrizations(debiased, int(self.sparse_task))
+            self.bottleneck.switch_head(not debiased)
+            if self.adv_task_head:
+                self.task_head.switch_head(not debiased)
+            if grad_switch:
+                if not self.adv_task_head:
+                    self.task_head.freeze_parameters(first=True, frozen=debiased)
+                if self.sparse_task:
+                    self._freeze_parametrizations(debiased, 0)
+                else:
+                    self._freeze_original_parameters(debiased)
+            self._debiased = debiased
 
 
     def _init_optimizer_and_schedule(
@@ -453,7 +461,8 @@ class ModularDiffModel(BasePruningModel):
         output_dir: Union[str, os.PathLike],
         concrete_lower: float,
         concrete_upper: float,
-        structured_diff_pruning: bool
+        structured_diff_pruning: bool,
+        seed: Optional[int] = None
     ) -> None:
         info_dict = {
             "model_name": self.model_name,
@@ -482,14 +491,12 @@ class ModularDiffModel(BasePruningModel):
         output_dir = Path(output_dir)
         output_dir.mkdir(parents=True, exist_ok=True)
 
-        suffix = f"fixmask{self.fixmask_pct}" if self.fixmask_state else "diff_pruning"
-        
         filename_parts = [
             self.model_name.split('/')[-1],
-            f"fixmask{self.fixmask_pct}" if self.fixmask_state else "diff_pruning",
-            "modular",
+            "modular_" + f"fixmask{self.fixmask_pct}" if self.fixmask_state else "diff_pruning",
             "sparse_task" if self.sparse_task else None,
-            "merged_head" if not self.adv_task_head else None
+            "merged_head" if not self.adv_task_head else None,
+            f"seed{seed}" if seed is not None else None
         ]
         filename = "-".join([x for x in filename_parts if x is not None]) + ".pt"
         filepath = output_dir / filename

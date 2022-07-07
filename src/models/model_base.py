@@ -6,7 +6,7 @@ import contextlib
 import torch
 from torch.utils.data import DataLoader
 import torch.nn.utils.parametrize as parametrize
-from transformers import AutoModel, PretrainedConfig
+from transformers import AutoModel
 
 from typing import Union, List, Tuple, Optional, Dict, Callable
 
@@ -22,7 +22,7 @@ class ModelState(Enum):
 class BaseModel(torch.nn.Module):
 
     @property
-    def encoder_module(self) -> PretrainedConfig:
+    def encoder_module(self) -> torch.nn.Module:
         if isinstance(self.encoder, torch.nn.DataParallel):
             return self.encoder.module
         else:

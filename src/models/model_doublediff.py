@@ -104,7 +104,8 @@ class DoubleDiffModel(BasePruningModel):
         weight_decay: float,
         max_grad_norm: float,
         output_dir: Union[str, os.PathLike],
-        fixmask_pct: Optional[float] = None
+        fixmask_pct: Optional[float] = None,
+        seed: Optional[int] = None
     ) -> None:
 
         self.global_step = 0
@@ -215,7 +216,8 @@ class DoubleDiffModel(BasePruningModel):
                     Path(output_dir),
                     concrete_lower,
                     concrete_upper,
-                    structured_diff_pruning
+                    structured_diff_pruning,
+                    seed
                 )
 
         self.set_debiased(True) # make sure debiasing is active at end of training
@@ -369,22 +371,26 @@ class DoubleDiffModel(BasePruningModel):
 
 
     def set_debiased(self, debiased: bool) -> None:
-        if debiased:
-            self.bottleneck = self.bottleneck_debiased
-            self.task_head = self.task_head_debiased
-        else:
-            self.bottleneck = self.bottleneck_biased
-            self.task_head = self.task_head_biased
+        try:
+            check = (debiased != self._debiased)
+        except AttributeError:
+            check = True
+        if check:
+            if debiased:
+                self.bottleneck = self.bottleneck_debiased
+                self.task_head = self.task_head_debiased
+            else:
+                self.bottleneck = self.bottleneck_biased
+                self.task_head = self.task_head_biased
 
-        if self.fixmask_state:
-            self._activate_parametrizations(debiased, 1)
-            self._freeze_parametrizations(debiased, 0)
-        elif self.finetune_state:
-            for base_module in self.get_encoder_base_modules():
-                for par_list in base_module.parametrizations.values():
-                    par_list[0].set_weight_state(first = not debiased)
-
-        self._debiased = debiased
+            if self.fixmask_state:
+                self._activate_parametrizations(debiased, 1)
+                self._freeze_parametrizations(debiased, 0)
+            elif self.finetune_state:
+                for base_module in self.get_encoder_base_modules():
+                    for par_list in base_module.parametrizations.values():
+                        par_list[0].set_weight_state(first = not debiased)
+            self._debiased = debiased
 
 
     def _init_optimizer_and_schedule(
@@ -436,7 +442,8 @@ class DoubleDiffModel(BasePruningModel):
         output_dir: Union[str, os.PathLike],
         concrete_lower: float,
         concrete_upper: float,
-        structured_diff_pruning: bool
+        structured_diff_pruning: bool,
+        seed: Optional[int] = None
     ) -> None:
         info_dict = {
             "model_name": self.model_name,
@@ -466,8 +473,8 @@ class DoubleDiffModel(BasePruningModel):
         output_dir.mkdir(parents=True, exist_ok=True)
         
         suffix = f"fixmask{self.fixmask_pct}" if self.fixmask_state else "diff_pruning"
-        
-        filename = f"{self.model_name.split('/')[-1]}-{suffix}-doublediff.pt"
+        seed_str = f"-seed{seed}" if seed is not None else ""
+        filename = f"{self.model_name.split('/')[-1]}-doublediff_{suffix}{seed_str}.pt"
         filepath = output_dir / filename
         torch.save(info_dict, filepath)
         return filepath

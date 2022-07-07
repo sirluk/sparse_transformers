@@ -1,3 +1,4 @@
+from optparse import Option
 import os
 import math
 from tqdm import trange, tqdm
@@ -69,7 +70,8 @@ class TaskModel(BaseModel):
         optimizer_warmup_steps: int,
         max_grad_norm: float,
         output_dir: Union[str, os.PathLike],
-        cooldown: int
+        cooldown: int,
+        seed: Optional[int] = None
     ) -> None:
 
         self.global_step = 0
@@ -113,7 +115,7 @@ class TaskModel(BaseModel):
             )
 
             if logger.is_best(result, ascending=True, k="loss", binary=True, suffix="task"):
-                cpt = self.save_checkpoint(Path(output_dir))
+                cpt = self.save_checkpoint(Path(output_dir), seed)
                 cpt_epoch = epoch
                 performance_decrease_counter = 0
             else:
@@ -207,7 +209,8 @@ class TaskModel(BaseModel):
 
     def save_checkpoint(
         self,
-        output_dir: Union[str, os.PathLike]
+        output_dir: Union[str, os.PathLike],
+        seed: Optional[int] = None
     ) -> None:
         info_dict = {
             "model_name": self.model_name,
@@ -225,7 +228,8 @@ class TaskModel(BaseModel):
         output_dir = Path(output_dir)
         output_dir.mkdir(parents=True, exist_ok=True)
         
-        filename = f"{self.model_name.split('/')[-1]}-task_baseline.pt"
+        seed_str = f"-seed{seed}" if seed is not None else ""
+        filename = f"{self.model_name.split('/')[-1]}-task_baseline{seed_str}.pt"
         filepath = output_dir / filename
         torch.save(info_dict, filepath)
         return filepath
