@@ -108,9 +108,7 @@ def get_name_for_run(baseline: bool, adv: bool, modular: bool, args_train: argpa
     if modular:
         run_parts.extend([
             "modular",
-            "sparse_task" if args_train.modular_sparse_task else None,
-            "merged_head" if not args_train.modular_adv_task_head else None,
-            "merged_cutoff" if args_train.modular_merged_cutoff else None
+            "merged_head" if not args_train.modular_adv_task_head else None
     ])
     else:
         run_parts.append("adverserial" if adv else "task")
@@ -120,6 +118,11 @@ def get_name_for_run(baseline: bool, adv: bool, modular: bool, args_train: argpa
         run_parts.append(
             f"diff_pruning_{args_train.fixmask_pct if args_train.num_epochs_fixmask>0 else 'no_fixmask'}"
         )
+        if modular:
+            run_parts.extend([
+                "sparse_task" if args_train.modular_sparse_task else None,
+                "merged_cutoff" if args_train.modular_merged_cutoff else None
+            ])
     if args_train.bottleneck:
         run_parts.append(f"bottleneck_{args_train.bottleneck_dim}")
     run_parts.extend([
