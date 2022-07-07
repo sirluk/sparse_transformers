@@ -89,7 +89,7 @@ def main():
     with open("cfg.yml", "r") as f:
         cfg = yaml.safe_load(f)
     data_cfg = f"data_config_{base_args.ds}"
-    args_train = argparse.Namespace(**cfg["train_config_diff_pruning"], **cfg[data_cfg], **cfg["model_config"])
+    args_train = argparse.Namespace(**cfg["train_config"], **cfg[data_cfg], **cfg["model_config"])
     args_attack = argparse.Namespace(**cfg["adv_attack"])
 
     if base_args.debug:
@@ -138,6 +138,7 @@ def main():
             adv_dropout = args_attack.adv_dropout,
             num_epochs = args_attack.num_epochs,
             lr = args_attack.learning_rate,
+            batch_size = args_train.attack_batch_size,
             cooldown = args_attack.cooldown
         )
 

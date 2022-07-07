@@ -1,5 +1,3 @@
-# import IPython; IPython.embed(); exit(1)
-
 import ruamel.yaml as yaml
 import argparse
 from pathlib import Path
@@ -11,6 +9,7 @@ from src.models.model_diff_modular import ModularDiffModel
 from src.models.model_diff_modular_legacy import ModularDiffModel as ModularDiffModelLegacy
 from src.models.model_adv import AdvModel
 from src.models.model_task import TaskModel
+from src.models.model_modular import ModularModel
 from src.training_logger import TrainLogger
 from src.adv_attack import adv_attack
 from src.utils import (
@@ -50,22 +49,24 @@ def main():
     train_loader, eval_loader, num_labels, num_labels_protected = get_data(args_train, ds=base_args.ds, debug=base_args.debug)
 
     ### DEFINE MANUALLY
-    cp_dir = "/share/home/lukash/checkpoints_bert_L4/seed0"
-    # cp_dir = "checkpoints_bios_seed1"
+    # cp_dir = "/share/home/lukash/checkpoints_bert_L4/seed4"
+    cp_dir = "checkpoints_bios"
     # cp = "bert_uncased_L-4_H-256_A-4-fixmask0.1-modular-sparse_task-merged_head.pt"
-    cp = "bert_uncased_L-4_H-256_A-4-fixmask0.1-modular.pt"
+    # cp = "bert_uncased_L-4_H-256_A-4-fixmask0.05-modular-sparse_task.pt"
+    # cp = "bert_uncased_L-4_H-256_A-4-fixmask0.05-modular.pt"
+    cp = "bert_uncased_L-4_H-256_A-4-modular_baseline-seed0.pt"
     # cp = "bert_uncased_L-4_H-256_A-4-task_baseline.pt"
     # cp = "bert_uncased_L-4_H-256_A-4-fixmask0.05-task.pt"
     # cp = "bert_uncased_L-4_H-256_A-4-fixmask0.1-adv.pt"
     # cp = "bert_uncased_L-4_H-256_A-4-fixmask0.1-modular.pt"
-    model_cls = ModularDiffModel
+    model_cls = ModularModel
     ### DEFINE MANUALLY
 
-    trainer = model_cls.load_checkpoint(f"{cp_dir}/{cp}")
+    trainer = model_cls.load_checkpoint(f"{cp_dir}/{cp}", remove_parametrizations=True, debiased=True)
     trainer.to(device)
 
     logger_name = "_".join([
-        f"only_adv_attack_{cp}",
+        f"only_adv_attack_{cp[:-3]}",
         str(args_train.batch_size),
         str(args_train.learning_rate),
         f"seed{base_args.seed}"
@@ -94,6 +95,7 @@ def main():
         adv_dropout = args_train.adv_dropout,
         num_epochs = args_train.num_epochs,
         lr = args_train.learning_rate,
+        batch_size = args_train.attack_batch_size,
         cooldown = args_train.cooldown
     )
 
