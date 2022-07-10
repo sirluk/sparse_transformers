@@ -106,29 +106,22 @@ def adv_attack(
         result = trainer._evaluate(val_loader, forward_fn, loss_fn, pred_fn, metrics, adv_head=adv_head)
 
         logger.validation_loss(epoch, result, logger_suffix)
-        d = {
-            "loss": True,
-            "acc": False,
-            "balanced_acc": False
-        }
-        logger.log_best({k: result[k] for k in d.keys()}, ascending=d.values(), suffix=logger_suffix)
 
         train_iterator.set_description(
             train_str.format(epoch, result_str(result)), refresh=True
         )
 
-        if logger.is_best(result, ascending=False, k="loss", binary=True, suffix=logger_suffix, log_best=False):
+        if logger.is_best(result["loss"], ascending=False):
+            best_result = result
             best_epoch = epoch
             performance_decrease_counter = 0
         else:
             performance_decrease_counter += 1
 
-        if performance_decrease_counter>cooldown:
+        if performance_decrease_counter > cooldown:
             break
 
-    logger.write_best_eval_metric()
-
     print("Adv Attack: Final result after " +  train_str.format(epoch, result_str(result)))
-    print("Adv Attack: Best result " +  train_str.format(best_epoch, result_str(logger.best_eval_metric)))
+    print("Adv Attack: Best result " +  train_str.format(best_epoch, result_str(best_result)))
     
     return adv_head

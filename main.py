@@ -320,16 +320,15 @@ def train_baseline_modular(device, train_loader, val_loader, num_labels, num_lab
 def main():
 
     parser = argparse.ArgumentParser()
-    # parser.add_argument("--debug", action="store_true")
-    parser.add_argument("--debug", type=bool, default=False, help="Whether to run on small subset for testing")
-    parser.add_argument("--adv", type=bool, default=False, help="Whether to run adverserial training")
-    parser.add_argument("--baseline", type=bool, default=False, help="Set to True if you want to run baseline models (no diff-pruning)")
-    parser.add_argument("--modular", type=bool, default=False, help="Whether to run modular training (task only and adverserial)")
-    parser.add_argument("--run_adv_attack", type=bool, default=True, help="Set to false if you do not want to run adverserial attack after training")
     parser.add_argument("--gpu_id", nargs="*", type=int, default=[0], help="")
+    parser.add_argument("--adv", action="store_true", help="Whether to run adverserial training")
+    parser.add_argument("--baseline", action="store_true", help="Set to True if you want to run baseline models (no diff-pruning)")
+    parser.add_argument("--modular", action="store_true", help="Whether to run modular training (task only and adverserial)")
     parser.add_argument("--seed", type=int, default=0, help="torch random seed")
     parser.add_argument("--ds", type=str, default="bios", help="dataset")
-    parser.add_argument("--cpu", type=bool, default=False, help="Run on cpu")
+    parser.add_argument("--debug", action="store_true", help="Whether to run on small subset for testing")
+    parser.add_argument("--cpu", action="store_true", help="Run on cpu")
+    parser.add_argument("--no_adv_attack", action="store_true", help="Set if you do not want to run adverserial attack after training")
     base_args = parser.parse_args()
 
     torch.manual_seed(base_args.seed)
@@ -370,7 +369,7 @@ def main():
         else:
             trainer = train_diff_pruning_task(device, train_loader, val_loader, num_labels, train_logger, args_train, base_args.seed)
 
-    if base_args.run_adv_attack:
+    if not base_args.no_adv_attack:
         loss_fn, pred_fn, metrics = get_callables(num_labels_protected)
         adv_attack(
             trainer = trainer,

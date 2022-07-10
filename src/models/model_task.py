@@ -114,8 +114,9 @@ class TaskModel(BaseModel):
                 train_str.format(epoch, str_suffix(result)), refresh=True
             )
 
-            if logger.is_best(result, ascending=True, k="loss", binary=True, suffix="task"):
+            if logger.is_best(result["loss"], ascending=True):
                 cpt = self.save_checkpoint(Path(output_dir), seed)
+                cpt_result = result
                 cpt_epoch = epoch
                 performance_decrease_counter = 0
             else:
@@ -124,10 +125,8 @@ class TaskModel(BaseModel):
             if performance_decrease_counter>cooldown:
                 break
 
-        logger.write_best_eval_metric()
-
         print("Final result after " + train_str.format(epoch, str_suffix(result)))
-        print("Best result: " + train_str.format(cpt_epoch, str_suffix(logger.best_eval_metric)))
+        print("Best result: " + train_str.format(cpt_epoch, str_suffix(cpt_result)))
         
         return cpt
 

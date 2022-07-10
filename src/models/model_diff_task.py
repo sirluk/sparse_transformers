@@ -163,7 +163,7 @@ class TaskDiffModel(BasePruningModel):
             )
 
             if self.fixmask_state or (num_epochs_fixmask == 0):
-                if logger.is_best(result, ascending=True, k="loss", binary=True, suffix="task"):
+                if logger.is_best(result["loss"], ascending=True):
                     cpt = self.save_checkpoint(
                         Path(output_dir),
                         concrete_lower,
@@ -171,6 +171,7 @@ class TaskDiffModel(BasePruningModel):
                         structured_diff_pruning,
                         seed
                     )
+                    cpt_result = result
                     cpt_epoch = epoch
                     cpt_model_state = self.model_state
                     performance_decrease_counter = 0
@@ -181,7 +182,7 @@ class TaskDiffModel(BasePruningModel):
                     break
 
         print("Final results after " + train_str.format(epoch, self.model_state, str_suffix(result)))
-        print("Best result: " + train_str.format(cpt_epoch, cpt_model_state, str_suffix(logger.best_eval_metric)))
+        print("Best result: " + train_str.format(cpt_epoch, cpt_model_state, str_suffix(cpt_result)))
 
         return cpt
 
