@@ -10,7 +10,7 @@ from transformers import get_linear_schedule_with_warmup
 
 from typing import Union, Callable, Dict, Optional, List, Tuple
 
-from src.models.model_heads import ClfHead, AdvHead
+from src.models.model_heads import SwitchHead, AdvHead, ClfHead
 from src.models.model_base import BasePruningModel, ModelState
 from src.models.weight_parametrizations import DoubleDiffWeightFinetune, DiffWeightFixmask
 from src.training_logger import TrainLogger
@@ -29,6 +29,7 @@ class DoubleDiffModel(BasePruningModel):
         adv_dropout: float = .3,
         adv_n_hidden: int = 1,
         adv_count: int = 5,
+        adv_task_head: bool = True,
         bottleneck: bool = False,
         bottleneck_dim: Optional[int] = None,
         bottleneck_dropout: Optional[float] = None,
@@ -43,23 +44,21 @@ class DoubleDiffModel(BasePruningModel):
         self.adv_dropout = adv_dropout
         self.adv_n_hidden = adv_n_hidden
         self.adv_count = adv_count
+        self.adv_task_head = adv_task_head
         self.has_bottleneck = bottleneck
         self.bottleneck_dim = bottleneck_dim
         self.bottleneck_dropout = bottleneck_dropout
 
         # bottleneck layer
         if self.has_bottleneck:
-            self.bottleneck_biased = ClfHead(self.hidden_size, bottleneck_dim, dropout=bottleneck_dropout)
-            self.bottleneck_debiased = ClfHead(self.hidden_size, bottleneck_dim, dropout=bottleneck_dropout)
+            self.bottleneck = SwitchHead(True, ClfHead, self.hidden_size, bottleneck_dim, dropout=bottleneck_dropout)
             self.in_size_heads = bottleneck_dim
         else:
-            self.bottleneck_biased = torch.nn.Identity()
-            self.bottleneck_debiased = torch.nn.Identity()
+            self.bottleneck = SwitchHead(True, torch.nn.Identity)
             self.in_size_heads = self.hidden_size
 
         # heads
-        self.task_head_biased = ClfHead([self.in_size_heads]*(task_n_hidden+1), num_labels_task, dropout=task_dropout)
-        self.task_head_debiased = ClfHead([self.in_size_heads]*(task_n_hidden+1), num_labels_task, dropout=task_dropout)
+        self.task_head = SwitchHead(adv_task_head, ClfHead, [self.in_size_heads]*(task_n_hidden+1), num_labels_task, dropout=task_dropout)
         self.adv_head = AdvHead(adv_count, hid_sizes=[self.in_size_heads]*(adv_n_hidden+1), num_labels=num_labels_protected, dropout=adv_dropout)
 
         self.set_debiased(False)
@@ -117,6 +116,7 @@ class DoubleDiffModel(BasePruningModel):
         log_ratio = self.get_log_ratio(concrete_lower, concrete_upper)
 
         self._init_sparsity_pen(sparsity_pen)
+
         self._add_diff_parametrizations(
             alpha_init = alpha_init,
             concrete_lower = concrete_lower,
@@ -140,6 +140,7 @@ class DoubleDiffModel(BasePruningModel):
 
         train_iterator = trange(num_epochs_total, desc=train_str.format(0, self.model_state, ""), leave=False, position=0)
         for epoch in train_iterator:
+
             if epoch<num_epochs_warmup:
                 _adv_lambda = 0.
             else:
@@ -285,10 +286,9 @@ class DoubleDiffModel(BasePruningModel):
             # START STEP TASK
             self.set_debiased(False)
 
+            loss = 0.
             losses_biased = torch.zeros((3,))
             for _ in range(concrete_samples):
-
-                loss = 0.
 
                 outputs = self(**inputs)
                 loss_task = loss_fn(outputs, labels_task.to(self.device))
@@ -302,14 +302,15 @@ class DoubleDiffModel(BasePruningModel):
 
                 losses_biased += torch.tensor([loss, loss_task, loss_l0]).detach()
 
-                loss /= concrete_samples
-                loss.backward()
+            loss /= concrete_samples_task
+            losses_biased /= concrete_samples_task
+
+            loss.backward()
 
             torch.nn.utils.clip_grad_norm_(self.parameters(), max_grad_norm)
 
-            self.optimizer.step() # TODO check if step only at end is better
+            self.optimizer.step()
             self.zero_grad()
-            losses_biased /= concrete_samples
 
             # END STEP TASK
             ##################################################
@@ -318,10 +319,9 @@ class DoubleDiffModel(BasePruningModel):
             # START STEP DEBIAS
             self.set_debiased(True)
 
+            loss = 0.
             losses_debiased = torch.zeros((4,))
             for _ in range(concrete_samples):
-
-                loss = 0.
 
                 hidden = self._forward(**inputs)
                 outputs_task = self.task_head(hidden)
@@ -340,14 +340,15 @@ class DoubleDiffModel(BasePruningModel):
 
                 losses_debiased += torch.tensor([loss, loss_task_adv, loss_protected, loss_l0_adv]).detach()
 
-                loss /= concrete_samples
-                loss.backward()
+            loss /= concrete_samples
+            losses_debiased /= concrete_samples
+
+            loss.backward()
 
             torch.nn.utils.clip_grad_norm_(self.parameters(), max_grad_norm)
 
             self.optimizer.step()
             self.zero_grad()
-            losses_debiased /= concrete_samples
 
             # END STEP DEBIAS
             ##################################################
@@ -376,13 +377,9 @@ class DoubleDiffModel(BasePruningModel):
         except AttributeError:
             check = True
         if check:
-            if debiased:
-                self.bottleneck = self.bottleneck_debiased
-                self.task_head = self.task_head_debiased
-            else:
-                self.bottleneck = self.bottleneck_biased
-                self.task_head = self.task_head_biased
-
+            self.bottleneck.switch_head(not debiased)
+            if self.adv_task_head:
+                self.task_head.switch_head(not debiased)
             if self.fixmask_state:
                 self._activate_parametrizations(debiased, 1)
                 self._freeze_parametrizations(debiased, 0)
@@ -409,19 +406,11 @@ class DoubleDiffModel(BasePruningModel):
 
         optimizer_param_groups.extend([
             {
-                "params": self.bottleneck_biased.parameters(),
+                "params": self.bottleneck.parameters(),
                 "lr": learning_rate_bottleneck
             },
             {
-                "params": self.bottleneck_debiased.parameters(),
-                "lr": learning_rate_bottleneck
-            },
-            {
-                "params": self.task_head_biased.parameters(),
-                "lr": learning_rate_task_head
-            },
-            {
-                "params": self.task_head_debiased.parameters(),
+                "params": self.task_head.parameters(),
                 "lr": learning_rate_task_head
             },
             {
@@ -454,15 +443,14 @@ class DoubleDiffModel(BasePruningModel):
             "adv_dropout": self.adv_dropout,
             "adv_n_hidden": self.adv_n_hidden,
             "adv_count": self.adv_count,
+            "adv_task_head": self.adv_task_head,
             "bottleneck": self.has_bottleneck,
             "bottleneck_dim": self.bottleneck_dim,
             "bottleneck_dropout": self.bottleneck_dropout,
             "model_state": self.model_state,
             "encoder_state_dict": self.encoder_module.state_dict(),
-            "bottleneck_biased_state_dict": self.bottleneck_biased.state_dict(),
-            "bottleneck_debiased_state_dict": self.bottleneck_debiased.state_dict(),
-            "task_head_biased_state_dict": self.task_head_biased.state_dict(),
-            "task_head_debiased_state_dict": self.task_head_debiased.state_dict(),
+            "bottleneck_state_dict": self.bottleneck.state_dict(),
+            "task_head_state_dict": self.task_head.state_dict(),
             "adv_head_state_dict": self.adv_head.state_dict(),
             "concrete_lower": concrete_lower,
             "concrete_upper": concrete_upper,
@@ -471,10 +459,14 @@ class DoubleDiffModel(BasePruningModel):
 
         output_dir = Path(output_dir)
         output_dir.mkdir(parents=True, exist_ok=True)
-        
-        suffix = f"fixmask{self.fixmask_pct}" if self.fixmask_state else "diff_pruning"
-        seed_str = f"-seed{seed}" if seed is not None else ""
-        filename = f"{self.model_name.split('/')[-1]}-doublediff_{suffix}{seed_str}.pt"
+
+        filename_parts = [
+            self.model_name.split('/')[-1],
+            "doublediff_" + f"fixmask{self.fixmask_pct}" if self.fixmask_state else "diff_pruning",
+            "merged_head" if not self.adv_task_head else None,
+            f"seed{seed}" if seed is not None else None
+        ]
+        filename = "-".join([x for x in filename_parts if x is not None]) + ".pt"
         filepath = output_dir / filename
         torch.save(info_dict, filepath)
         return filepath
@@ -498,6 +490,7 @@ class DoubleDiffModel(BasePruningModel):
             info_dict['adv_dropout'],
             info_dict['adv_n_hidden'],
             info_dict['adv_count'],
+            info_dict['adv_task_head'],
             info_dict['bottleneck'],
             info_dict['bottleneck_dim'],
             info_dict['bottleneck_dropout']
@@ -512,10 +505,8 @@ class DoubleDiffModel(BasePruningModel):
         )
 
         cls_instance.encoder.load_state_dict(info_dict['encoder_state_dict'])
-        cls_instance.bottleneck_biased.load_state_dict(info_dict['bottleneck_biased_state_dict'])
-        cls_instance.bottleneck_debiased.load_state_dict(info_dict['bottleneck_debiased_state_dict'])
-        cls_instance.task_head_biased.load_state_dict(info_dict['task_head_biased_state_dict'])
-        cls_instance.task_head_debiased.load_state_dict(info_dict['task_head_debiased_state_dict'])
+        cls_instance.bottleneck.load_state_dict(info_dict['bottleneck_state_dict'])
+        cls_instance.task_head.load_state_dict(info_dict['task_head_state_dict'])
         cls_instance.adv_head.load_state_dict(info_dict['adv_head_state_dict'])
 
         cls_instance.set_debiased(debiased)

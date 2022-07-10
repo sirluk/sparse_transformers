@@ -17,7 +17,7 @@ from src.utils import (
 torch.manual_seed(0)
 
 
-def train_doublediff_pruning(device, train_loader, val_loader, num_labels, num_labels_protected, train_logger, args_train):
+def train_doublediff_pruning(device, train_loader, val_loader, num_labels, num_labels_protected, train_logger, args_train, seed = None):
 
     loss_fn, pred_fn, metrics = get_callables(num_labels)
     loss_fn_protected, pred_fn_protected, metrics_protected = get_callables(num_labels_protected)
@@ -31,6 +31,7 @@ def train_doublediff_pruning(device, train_loader, val_loader, num_labels, num_l
         adv_dropout = args_train.adv_dropout,
         adv_n_hidden = args_train.adv_n_hidden,
         adv_count = args_train.adv_count,
+        adv_task_head = args_train.modular_adv_task_head,
         bottleneck = args_train.bottleneck,
         bottleneck_dim = args_train.bottleneck_dim,
         bottleneck_dropout = args_train.bottleneck_dropout,
@@ -65,7 +66,8 @@ def train_doublediff_pruning(device, train_loader, val_loader, num_labels, num_l
         weight_decay = args_train.weight_decay,
         max_grad_norm = args_train.max_grad_norm,
         output_dir = args_train.output_dir,
-        fixmask_pct = args_train.fixmask_pct
+        fixmask_pct = args_train.fixmask_pct,
+        seed = seed
     )
     trainer = DoubleDiffModel.load_checkpoint(trainer_cp)
     trainer.to(device)
@@ -75,12 +77,12 @@ def train_doublediff_pruning(device, train_loader, val_loader, num_labels, num_l
 def main():
 
     parser = argparse.ArgumentParser()
-    parser.add_argument("--debug", type=bool, default=False, help="Whether to run on small subset for testing")
-    parser.add_argument("--run_adv_attack", type=bool, default=True, help="Set to false if you do not want to run adverserial attack after training")
     parser.add_argument("--gpu_id", nargs="*", type=int, default=[0], help="")
     parser.add_argument("--seed", type=int, default=0, help="torch random seed")
     parser.add_argument("--ds", type=str, default="bios", help="dataset")
-    parser.add_argument("--cpu", type=bool, default=False, help="Run on cpu")
+    parser.add_argument("--debug", action="store_true", help="Whether to run on small subset for testing")
+    parser.add_argument("--cpu", action="store_true", help="Run on cpu")
+    parser.add_argument("--no_adv_attack", action="store_true", help="Set if you do not want to run adverserial attack after training")
     base_args = parser.parse_args()
 
     torch.manual_seed(base_args.seed)
@@ -122,7 +124,7 @@ def main():
 
     trainer = train_doublediff_pruning(device, train_loader, val_loader, num_labels, num_labels_protected, train_logger, args_train)
 
-    if base_args.run_adv_attack:
+    if not base_args.no_adv_attack:
         loss_fn, pred_fn, metrics = get_callables(num_labels_protected)
         adv_attack(
             trainer = trainer,
@@ -138,7 +140,7 @@ def main():
             adv_dropout = args_attack.adv_dropout,
             num_epochs = args_attack.num_epochs,
             lr = args_attack.learning_rate,
-            batch_size = args_train.attack_batch_size,
+            batch_size = args_attack.attack_batch_size,
             cooldown = args_attack.cooldown
         )
 

@@ -22,15 +22,15 @@ class TrainLogger:
     ):
         assert logging_step > 0, "logging_step needs to be > 0"
 
-        self.logger_name = logger_name
-
         if isinstance(log_dir, str):
             log_dir = Path(log_dir)
         log_dir.mkdir(exist_ok=True, parents=True)
 
-        self.writer = SummaryWriter(log_dir / logger_name)
-
+        self.log_dir = log_dir
+        self.logger_name = logger_name
         self.logging_step = logging_step
+
+        self.writer = SummaryWriter(log_dir / logger_name)
 
         self.reset()
 

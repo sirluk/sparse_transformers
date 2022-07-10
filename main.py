@@ -320,6 +320,7 @@ def train_baseline_modular(device, train_loader, val_loader, num_labels, num_lab
 def main():
 
     parser = argparse.ArgumentParser()
+    # parser.add_argument("--debug", action="store_true")
     parser.add_argument("--debug", type=bool, default=False, help="Whether to run on small subset for testing")
     parser.add_argument("--adv", type=bool, default=False, help="Whether to run adverserial training")
     parser.add_argument("--baseline", type=bool, default=False, help="Set to True if you want to run baseline models (no diff-pruning)")
@@ -385,7 +386,7 @@ def main():
             adv_dropout = args_attack.adv_dropout,
             num_epochs = args_attack.num_epochs,
             lr = args_attack.learning_rate,
-            batch_size = args_train.attack_batch_size,
+            batch_size = args_attack.attack_batch_size,
             cooldown = args_attack.cooldown,
             logger_suffix = f"adv_attack{'_unbiased' if (base_args.adv or base_args.modular) else ''}"
         )
@@ -405,7 +406,7 @@ def main():
                 adv_dropout = args_attack.adv_dropout,
                 num_epochs = args_attack.num_epochs,
                 lr = args_attack.learning_rate,
-                batch_size = args_train.attack_batch_size,
+                batch_size = args_attack.attack_batch_size,
                 cooldown = args_attack.cooldown,
                 logger_suffix = "adv_attack_biased"
             )
