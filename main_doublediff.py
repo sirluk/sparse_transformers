@@ -105,7 +105,7 @@ def main():
 
     log_dir = Path(args_train.log_dir)
     log_dir.mkdir(parents=True, exist_ok=True)
-    logger_name = "_".join([x for x in [
+    logger_name = "-".join([x for x in [
         "DEBUG" if base_args.debug else "",
         f"doublediff_{args_train.fixmask_pct if args_train.num_epochs_fixmask>0 else 'no_fixmask'}",
         f"bottleneck_{args_train.bottleneck_dim}" if args_train.bottleneck else "",

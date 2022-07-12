@@ -65,7 +65,7 @@ def main():
     trainer = model_cls.load_checkpoint(f"{cp_dir}/{cp}", remove_parametrizations=True, debiased=True)
     trainer.to(device)
 
-    logger_name = "_".join([
+    logger_name = "-".join([
         f"only_adv_attack_{cp[:-3]}",
         str(args_train.batch_size),
         str(args_train.learning_rate),
