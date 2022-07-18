@@ -5,6 +5,8 @@ logs*
 checkpoints*
 DEBUG_checkpoints*
 DEBUG_logs*
+analysis/charts/*
+analysis/data/*
 
 # Byte-compiled / optimized / DLL files
 __pycache__/
