@@ -375,9 +375,13 @@ class AdvDiffModel(BasePruningModel):
         output_dir = Path(output_dir)
         output_dir.mkdir(parents=True, exist_ok=True)
 
-        suffix = f"fixmask{self.fixmask_pct}" if self.fixmask_state else "diff_pruning"
-        seed_str = f"-seed{seed}" if seed is not None else ""
-        filename = f"{self.model_name.split('/')[-1]}-adv_{suffix}{seed_str}.pt"
+        filename_parts = [
+            self.model_name.split('/')[-1],
+            "adv_" + f"fixmask{self.fixmask_pct}" if self.fixmask_state else "diff_pruning",
+            "cp_init" if self.state_dict_init else None,
+            f"seed{seed}" if seed is not None else None
+        ]
+        filename = "-".join([x for x in filename_parts if x is not None]) + ".pt"
         filepath = output_dir / filename
         torch.save(info_dict, filepath)
         return filepath
