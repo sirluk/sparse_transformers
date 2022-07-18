@@ -6,6 +6,7 @@ import torch
 from torch.utils.data import DataLoader
 from torch.optim import AdamW
 from transformers import get_linear_schedule_with_warmup
+from collections import OrderedDict
 
 from typing import Union, Callable, Dict, Optional
 
@@ -30,9 +31,10 @@ class AdvModel(BaseModel):
         bottleneck: bool = False,
         bottleneck_dim: Optional[int] = None,
         bottleneck_dropout: Optional[float] = None,
+        model_state_dict: Optional[OrderedDict] = None,
         **kwargs
     ):
-        super().__init__(model_name, **kwargs)
+        super().__init__(model_name, model_state_dict, **kwargs)
 
         self.num_labels_task = num_labels_task
         self.num_labels_protected = num_labels_protected

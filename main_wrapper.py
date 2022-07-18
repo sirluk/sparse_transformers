@@ -1,9 +1,16 @@
 import subprocess
+import os
 
-# https://stackoverflow.com/questions/30686295/how-do-i-run-multiple-subprocesses-in-parallel-and-wait-for-them-to-finish-in-py
+debug = True
+
+suffix = " --debug" if debug else ""
+
+folder = "/share/home/lukash/checkpoints_bert_L4/seed{}"
+experiment_name = "bert_uncased_L-4_H-256_A-4-fixmask0.1-task.pt"
 
 for i in range(5):
-    subprocess.call(f'python3 main.py --modular=True --gpu_id=3 --seed={i}', shell=True)
+    filepath = os.path.join(folder.format(i), experiment_name)
+    subprocess.call(f'python3 main.py --adv --gpu_id=7 --seed=0' + suffix, shell=True)
 
 
 # from subprocess import Popen

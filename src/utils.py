@@ -103,7 +103,15 @@ def get_data(args_train: argparse.Namespace, ds: str, debug: bool = False) -> Tu
     return train_loader, val_loader, num_labels, num_labels_protected
 
 
-def get_name_for_run(baseline: bool, adv: bool, modular: bool, args_train: argparse.Namespace, debug: bool = False, seed: Optional[int] = None):
+def get_name_for_run(
+    baseline: bool,
+    adv: bool,
+    modular: bool,
+    args_train: argparse.Namespace,
+    debug: bool = False,
+    cp_path: Optional[bool] = False,
+    seed: Optional[int] = None
+):
     run_parts = ["DEBUG" if debug else None]
     if modular:
         run_parts.extend([
@@ -129,16 +137,26 @@ def get_name_for_run(baseline: bool, adv: bool, modular: bool, args_train: argpa
         args_train.model_name.split('/')[-1],
         str(args_train.batch_size),
         str(args_train.learning_rate),
+        "cp_init" if cp_path else None,
         f"seed{seed}" if seed is not None else None
     ])
     run_name = "-".join([x for x in run_parts if x is not None])
     return run_name
 
 
-def get_logger(baseline: bool, adv: bool, modular: bool, args_train: argparse.Namespace, debug: bool = False, seed: Optional[int] = None) -> TrainLogger:
+def get_logger(
+    baseline: bool,
+    adv: bool,
+    modular: bool,
+    args_train: argparse.Namespace,
+    debug: bool = False,
+    cp_path: Optional[bool] = False,
+    seed: Optional[int] = None
+) -> TrainLogger:
+
     log_dir = Path(args_train.log_dir)
     log_dir.mkdir(parents=True, exist_ok=True)
-    logger_name = get_name_for_run(baseline, adv, modular, args_train, debug, seed)
+    logger_name = get_name_for_run(baseline, adv, modular, args_train, debug, cp_path, seed)
     return TrainLogger(
         log_dir = log_dir,
         logger_name = logger_name,

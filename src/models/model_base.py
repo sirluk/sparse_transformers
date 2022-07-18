@@ -7,6 +7,7 @@ import torch
 from torch.utils.data import DataLoader
 import torch.nn.utils.parametrize as parametrize
 from transformers import AutoModel
+from collections import OrderedDict
 
 from typing import Union, List, Tuple, Optional, Dict, Callable
 
@@ -53,9 +54,15 @@ class BaseModel(torch.nn.Module):
                 return getattr(cfg, k) + 1 # +1 for embedding layer and last layer
         raise Exception("number of layers of pre trained model could not be determined")
 
-    def __init__(self, model_name: str, **kwargs):
+    def __init__(self, model_name: str, model_state_dict: OrderedDict = None, **kwargs):
         super().__init__()
         self.encoder = AutoModel.from_pretrained(model_name, **kwargs)
+
+        if model_state_dict is not None:
+            self.encoder.load_state_dict(model_state_dict)
+            self.state_dict_init = True
+        else:
+            self.state_dict_init = False
 
     def _forward(self, **x) -> torch.Tensor:
         return self.encoder(**x)[0][:,0]
@@ -348,9 +355,9 @@ class BasePruningModel(BaseModel):
     def _finetune_to_fixmask(self, pct: Optional[float] = None, n_parametrizations: int = 1, merged_cutoff: bool = False, merged_min_pct: float = 0.01) -> None:
 
         def _get_cutoff(values, pct, abs = True):
-            k = math.ceil(len(values) * pct)
+            k = int(round(len(values) * pct, 0))
             if abs: values = torch.abs(values)
-            return torch.topk(values, k, largest=True, sorted=True)[0][-1]
+            return torch.topk(values, k+1, largest=True, sorted=True)[0][-1]
 
         assert self.model_state == ModelState.FINETUNING, "model needs to be in finetuning state"
 
@@ -387,7 +394,7 @@ class BasePruningModel(BaseModel):
                         diff_weight = par_list[idx].diff_weight(w)
                         if pct is not None:
                             i = 0 if merged_cutoff else idx
-                            diff_mask = (torch.abs(diff_weight) >= cutoffs[i])
+                            diff_mask = (torch.abs(diff_weight) > cutoffs[i])
                         else:
                             diff_mask = ~torch.isclose(diff_weight, torch.tensor(0.), rtol=1e-8)
                         diff_weights.append((diff_weight, diff_mask))

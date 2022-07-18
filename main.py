@@ -19,9 +19,15 @@ from src.utils import (
 )
 
 
-def train_diff_pruning_task(device, train_loader, val_loader, num_labels, train_logger, args_train, seed = None):
+def train_diff_pruning_task(device, train_loader, val_loader, num_labels, train_logger, args_train, cp_path = None, seed = None):
 
     loss_fn, pred_fn, metrics = get_callables(num_labels)
+
+    if cp_path:
+        m = AdvDiffModel.load_checkpoint(cp_path, remove_parametrizations=True)
+        model_state_dict = m.encoder.state_dict()
+    else:
+        model_state_dict = None
 
     trainer = TaskDiffModel(
         model_name = args_train.model_name,
@@ -30,7 +36,8 @@ def train_diff_pruning_task(device, train_loader, val_loader, num_labels, train_
         n_hidden = args_train.task_n_hidden,
         bottleneck = args_train.bottleneck,
         bottleneck_dim = args_train.bottleneck_dim,
-        bottleneck_dropout = args_train.bottleneck_dropout
+        bottleneck_dropout = args_train.bottleneck_dropout,
+        model_state_dict = model_state_dict
     )
     trainer.to(device)
     trainer_cp = trainer.fit(
@@ -66,10 +73,16 @@ def train_diff_pruning_task(device, train_loader, val_loader, num_labels, train_
     return trainer
 
 
-def train_diff_pruning_adv(device, train_loader, val_loader, num_labels, num_labels_protected, train_logger, args_train, seed = None):
+def train_diff_pruning_adv(device, train_loader, val_loader, num_labels, num_labels_protected, train_logger, args_train, cp_path = None, seed = None):
 
     loss_fn, pred_fn, metrics = get_callables(num_labels)
     loss_fn_protected, pred_fn_protected, metrics_protected = get_callables(num_labels_protected)
+
+    if cp_path:
+        m = TaskDiffModel.load_checkpoint(cp_path, remove_parametrizations=True)
+        model_state_dict = m.encoder.state_dict()
+    else:
+        model_state_dict = None
 
     trainer = AdvDiffModel(
         model_name = args_train.model_name,
@@ -83,6 +96,7 @@ def train_diff_pruning_adv(device, train_loader, val_loader, num_labels, num_lab
         bottleneck = args_train.bottleneck,
         bottleneck_dim = args_train.bottleneck_dim,
         bottleneck_dropout = args_train.bottleneck_dropout,
+        model_state_dict = model_state_dict
     )
     trainer.to(device)
     trainer_cp = trainer.fit(
@@ -184,9 +198,15 @@ def train_diff_pruning_modular(device, train_loader, val_loader, num_labels, num
     return trainer
 
 
-def train_baseline_task(device, train_loader, val_loader, num_labels, train_logger, args_train, seed = None):
+def train_baseline_task(device, train_loader, val_loader, num_labels, train_logger, args_train, cp_path = None, seed = None):
 
     loss_fn, pred_fn, metrics = get_callables(num_labels)
+
+    if cp_path:
+        m = AdvModel.load_checkpoint(cp_path)
+        model_state_dict = m.encoder.state_dict()
+    else:
+        model_state_dict = None
 
     trainer = TaskModel(
         model_name = args_train.model_name,
@@ -195,7 +215,8 @@ def train_baseline_task(device, train_loader, val_loader, num_labels, train_logg
         n_hidden = args_train.task_n_hidden,
         bottleneck = args_train.bottleneck,
         bottleneck_dim = args_train.bottleneck_dim,
-        bottleneck_dropout = args_train.bottleneck_dropout
+        bottleneck_dropout = args_train.bottleneck_dropout,
+        model_state_dict = model_state_dict
     )
     trainer.to(device)
     trainer_cp = trainer.fit(
@@ -221,10 +242,16 @@ def train_baseline_task(device, train_loader, val_loader, num_labels, train_logg
     return trainer
 
 
-def train_baseline_adv(device, train_loader, val_loader, num_labels, num_labels_protected, train_logger, args_train, seed = None):
+def train_baseline_adv(device, train_loader, val_loader, num_labels, num_labels_protected, train_logger, args_train, cp_path = None, seed = None):
 
     loss_fn, pred_fn, metrics = get_callables(num_labels)
     loss_fn_protected, pred_fn_protected, metrics_protected = get_callables(num_labels_protected)
+
+    if cp_path:
+        m = TaskModel.load_checkpoint(cp_path)
+        model_state_dict = m.encoder.state_dict()
+    else:
+        model_state_dict = None
 
     trainer = AdvModel(
         model_name = args_train.model_name,
@@ -237,7 +264,8 @@ def train_baseline_adv(device, train_loader, val_loader, num_labels, num_labels_
         adv_count = args_train.adv_count,
         bottleneck = args_train.bottleneck,
         bottleneck_dim = args_train.bottleneck_dim,
-        bottleneck_dropout = args_train.bottleneck_dropout
+        bottleneck_dropout = args_train.bottleneck_dropout,
+        model_state_dict = model_state_dict
     )
     trainer.to(device)
     trainer_cp = trainer.fit(
@@ -329,7 +357,11 @@ def main():
     parser.add_argument("--debug", action="store_true", help="Whether to run on small subset for testing")
     parser.add_argument("--cpu", action="store_true", help="Run on cpu")
     parser.add_argument("--no_adv_attack", action="store_true", help="Set if you do not want to run adverserial attack after training")
+    parser.add_argument("--cp_path", type=str, help="initialize encoder weights for adv training from task model")
     base_args = parser.parse_args()
+
+    if base_args.modular:
+        assert base_args is None, "checkpoint can only be used for non-modular models"
 
     torch.manual_seed(base_args.seed)
     print(f"torch.manual_seed({base_args.seed})")
@@ -350,7 +382,7 @@ def main():
 
     train_loader, val_loader, num_labels, num_labels_protected = get_data(args_train, ds=base_args.ds, debug=base_args.debug)
     
-    train_logger = get_logger(base_args.baseline, base_args.adv, base_args.modular, args_train, base_args.debug, base_args.seed)
+    train_logger = get_logger(base_args.baseline, base_args.adv, base_args.modular, args_train, base_args.debug, (base_args.cp_path is not None), base_args.seed)
 
     print(f"Running {train_logger.logger_name}")
 
@@ -358,16 +390,16 @@ def main():
         if base_args.modular:
             trainer = train_baseline_modular(device, train_loader, val_loader, num_labels, num_labels_protected, train_logger, args_train, base_args.seed)
         elif base_args.adv:
-            trainer = train_baseline_adv(device, train_loader, val_loader, num_labels, num_labels_protected, train_logger, args_train, base_args.seed)
+            trainer = train_baseline_adv(device, train_loader, val_loader, num_labels, num_labels_protected, train_logger, args_train, base_args.cp_path, base_args.seed)
         else:
-            trainer = train_baseline_task(device, train_loader, val_loader, num_labels, train_logger, args_train, base_args.seed)
+            trainer = train_baseline_task(device, train_loader, val_loader, num_labels, train_logger, args_train, base_args.cp_path, base_args.seed)
     else:
         if base_args.modular:
             trainer = train_diff_pruning_modular(device, train_loader, val_loader, num_labels, num_labels_protected, train_logger, args_train, base_args.seed)
         elif base_args.adv:
-            trainer = train_diff_pruning_adv(device, train_loader, val_loader, num_labels, num_labels_protected, train_logger, args_train, base_args.seed)
+            trainer = train_diff_pruning_adv(device, train_loader, val_loader, num_labels, num_labels_protected, train_logger, args_train, base_args.cp_path, base_args.seed)
         else:
-            trainer = train_diff_pruning_task(device, train_loader, val_loader, num_labels, train_logger, args_train, base_args.seed)
+            trainer = train_diff_pruning_task(device, train_loader, val_loader, num_labels, train_logger, args_train, base_args.cp_path, base_args.seed)
 
     if not base_args.no_adv_attack:
         loss_fn, pred_fn, metrics = get_callables(num_labels_protected)
