@@ -361,7 +361,7 @@ def main():
     base_args = parser.parse_args()
 
     if base_args.modular:
-        assert base_args is None, "checkpoint can only be used for non-modular models"
+        assert base_args.cp_path is None, "checkpoint can only be used for non-modular models"
 
     torch.manual_seed(base_args.seed)
     print(f"torch.manual_seed({base_args.seed})")
