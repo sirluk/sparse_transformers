@@ -7,11 +7,11 @@ data_config_bios:
     output_dir: "checkpoints_bios"
     log_dir: "logs_bios"
 data_config_pan16:
-    train_pkl: "/share/cp/datasets/nlp/text_classification_bias/PAN16_prep/train_balanced_every_age.pkl"
-    val_pkl: "/share/cp/datasets/nlp/text_classification_bias/PAN16_prep/test.pkl"
-    test_pkl: "/share/cp/datasets/nlp/text_classification_bias/PAN16_prep/test.pkl"
-    labels_protected_path: "/share/cp/datasets/nlp/text_classification_bias/PAN16_prep/labels_protected_gender.txt"
-    labels_task_path: "/share/cp/datasets/nlp/text_classification_bias/PAN16_prep/labels_task.txt"
+    train_pkl: "/share/cp/datasets/nlp/text_classification_bias/pan16_prep/train_balanced.pkl"
+    val_pkl: "/share/cp/datasets/nlp/text_classification_bias/pan16_prep/test.pkl"
+    test_pkl: "/share/cp/datasets/nlp/text_classification_bias/pan16_prep/test.pkl"
+    labels_protected_path: "/share/cp/datasets/nlp/text_classification_bias/pan16_prep/labels_protected_gender.txt"
+    labels_task_path: "/share/cp/datasets/nlp/text_classification_bias/pan16_prep/labels_task.txt"
     output_dir: "checkpoints_pan16"
     log_dir: "logs_pan16"
 data_config_hatespeech:
@@ -53,11 +53,11 @@ train_config:
     optimizer_warmup_steps: 0
     sparsity_pen: 1.25e-7
     max_grad_norm: 1.0
-    fixmask_pct: 0.1
+    fixmask_pct: 0.01
     logging_step: 5
     cooldown: 5
     modular_sparse_task: True
-    modular_adv_task_head: True
+    modular_adv_task_head: False
     modular_merged_cutoff: False
     modular_merged_min_pct: 0.01
 adv_attack:
