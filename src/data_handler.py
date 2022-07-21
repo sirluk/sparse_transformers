@@ -92,7 +92,7 @@ def _get_data_loader(
     input_ids, token_type_ids, attention_masks = multiprocess_tokenization(list(data[text_key]), tokenizer, max_length)
 
     labels_task = read_label_file(labels_task_path)
-    labels_task = torch.tensor([labels_task[t] for t in data[task_key]], dtype=torch.long)
+    labels_task = torch.tensor([labels_task[str(t)] for t in data[task_key]], dtype=torch.long)
 
     tds = [
         input_ids,
@@ -103,7 +103,7 @@ def _get_data_loader(
 
     if labels_prot_path:
         labels_prot = read_label_file(labels_prot_path)
-        tds.append(torch.tensor([labels_prot[t] for t in data[protected_key]], dtype=torch.long))
+        tds.append(torch.tensor([labels_prot[str(t)] for t in data[protected_key]], dtype=torch.long))
         collate_fn = batch_fn_prot
     else:
         collate_fn = batch_fn
@@ -151,7 +151,7 @@ def get_data_loader_pan16(
     debug=False
 ):
     return _get_data_loader(
-        "age",
+        "mention",
         "gender",
         "text",
         tokenizer,
