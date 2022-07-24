@@ -15,7 +15,8 @@ from src.utils import (
     set_dir_debug,
     get_data,
     get_logger,
-    get_callables
+    get_callables,
+    set_optional_args
 )
 
 
@@ -358,7 +359,7 @@ def main():
     parser.add_argument("--cpu", action="store_true", help="Run on cpu")
     parser.add_argument("--no_adv_attack", action="store_true", help="Set if you do not want to run adverserial attack after training")
     parser.add_argument("--cp_path", type=str, help="initialize encoder weights for adv training from task model")
-    base_args = parser.parse_args()
+    base_args, optional = parser.parse_known_args()
 
     if base_args.modular:
         assert base_args.cp_path is None, "checkpoint can only be used for non-modular models"
@@ -368,15 +369,16 @@ def main():
 
     with open("cfg.yml", "r") as f:
         cfg = yaml.safe_load(f)
-
     data_cfg = f"data_config_{base_args.ds}"
     args_train = argparse.Namespace(**cfg["train_config"], **cfg[data_cfg], **cfg["model_config"])
     args_attack = argparse.Namespace(**cfg["adv_attack"])
 
+    set_optional_args(args_train, optional)
+
     if base_args.debug:
-        args_train = set_num_epochs_debug(args_train)
-        args_attack = set_num_epochs_debug(args_attack)
-        args_train = set_dir_debug(args_train)
+        set_num_epochs_debug(args_train)
+        set_num_epochs_debug(args_attack)
+        set_dir_debug(args_train)
 
     device = get_device(not base_args.cpu, base_args.gpu_id)
 

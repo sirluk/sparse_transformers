@@ -17,7 +17,8 @@ from src.utils import (
     set_num_epochs_debug,
     set_dir_debug,
     get_data,
-    get_callables
+    get_callables,
+    set_optional_args
 )
 
 torch.manual_seed(0)
@@ -30,7 +31,7 @@ def main():
     parser.add_argument("--seed", type=int, default=0, help="torch random seed")
     parser.add_argument("--ds", type=str, default="bios", help="dataset")
     parser.add_argument("--cpu", type=bool, default=False, help="Run on cpu")
-    base_args = parser.parse_args()
+    base_args, optional = parser.parse_known_args()
 
     torch.manual_seed(base_args.seed)
     print(f"torch.manual_seed({base_args.seed})")
@@ -42,9 +43,11 @@ def main():
     data_cfg = f"data_config_{base_args.ds}"
     args_train = argparse.Namespace(**cfg["adv_attack"], **cfg[data_cfg], **cfg["model_config"])
 
+    set_optional_args(args_train, optional)
+
     if base_args.debug:
-        args_train = set_num_epochs_debug(args_train)
-        args_train = set_dir_debug(args_train)
+        set_num_epochs_debug(args_train)
+        set_dir_debug(args_train)
 
     train_loader, eval_loader, num_labels, num_labels_protected = get_data(args_train, ds=base_args.ds, debug=base_args.debug)
 

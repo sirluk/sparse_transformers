@@ -176,3 +176,24 @@ def get_callables(num_labels: int) -> Tuple[Callable, Callable, Dict[str, Callab
         "balanced_acc": lambda x, y: accuracy(x, y, balanced=True)
     }
     return loss_fn, pred_fn, metrics
+
+
+def set_optional_args(args_obj: argparse.Namespace, optional_args: list) -> argparse.Namespace:
+    ignored = []
+    for arg in optional_args:
+        assert arg.startswith("--"), "arguments need to start with '--'"
+        arg_name = arg.split("=")[0][2:]
+        if arg_name in args_obj:
+            arg_dtype = type(getattr(args_obj, arg_name))
+            if "=" in arg:
+                v = arg.split("=")[1]
+                arg_value = arg_dtype(v) if arg_dtype!=bool else eval(v)
+            else:
+                arg_value = True
+            setattr(args_obj, arg_name, arg_value)
+        else:
+            ignored.append(arg)
+
+    if len(ignored) > 0: print(f"ignored args: {ignored}")
+
+    return args_obj

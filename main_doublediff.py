@@ -11,7 +11,8 @@ from src.utils import (
     set_num_epochs_debug,
     set_dir_debug,
     get_data,
-    get_callables
+    get_callables,
+    set_optional_args
 )
 
 torch.manual_seed(0)
@@ -83,7 +84,7 @@ def main():
     parser.add_argument("--debug", action="store_true", help="Whether to run on small subset for testing")
     parser.add_argument("--cpu", action="store_true", help="Run on cpu")
     parser.add_argument("--no_adv_attack", action="store_true", help="Set if you do not want to run adverserial attack after training")
-    base_args = parser.parse_args()
+    base_args, optional = parser.parse_known_args()
 
     torch.manual_seed(base_args.seed)
     print(f"torch.manual_seed({base_args.seed})")
@@ -94,10 +95,12 @@ def main():
     args_train = argparse.Namespace(**cfg["train_config"], **cfg[data_cfg], **cfg["model_config"])
     args_attack = argparse.Namespace(**cfg["adv_attack"])
 
+    set_optional_args(args_train, optional)
+
     if base_args.debug:
-        args_train = set_num_epochs_debug(args_train)
-        args_attack = set_num_epochs_debug(args_attack)
-        args_train = set_dir_debug(args_train)
+        set_num_epochs_debug(args_train)
+        set_num_epochs_debug(args_attack)
+        set_dir_debug(args_train)
 
     device = get_device(not base_args.cpu, base_args.gpu_id)
 
