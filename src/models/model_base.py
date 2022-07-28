@@ -317,7 +317,7 @@ class BasePruningModel(BaseModel):
             self.model_state = ModelState.FINETUNING
 
 
-    def _activate_parametrizations(self, active: bool, idx: int = 0):
+    def _activate_parametrizations(self, active: bool, idx):
         for base_module in self.get_encoder_base_modules():
             try:
                 for par_list in base_module.parametrizations.values():
