@@ -325,6 +325,8 @@ class ModularModel(BaseModel):
             self.bottleneck.switch_head(not debiased)
             if self.adv_task_head:
                 self.task_head.switch_head(not debiased)
+            else:
+                self.task_head.freeze_parameters(first=True, frozen=debiased)
             self._debiased = debiased
 
 
