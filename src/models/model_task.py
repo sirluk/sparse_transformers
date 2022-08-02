@@ -1,4 +1,3 @@
-from optparse import Option
 import os
 import math
 from tqdm import trange, tqdm

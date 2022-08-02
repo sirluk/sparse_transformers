@@ -1,4 +1,3 @@
-from lzma import MODE_NORMAL
 import os
 import math
 import copy
@@ -8,14 +7,12 @@ from functools import reduce
 import torch
 from torch.utils.data import DataLoader
 from torch.optim import AdamW
-import torch.nn.utils.parametrize as parametrize
 from transformers import get_linear_schedule_with_warmup
 
 from typing import Union, Callable, Dict, Optional
 
 from src.models.model_heads import SwitchHead, AdvHead, ClfHead
-from src.models.model_base import BaseModel, ModelState
-from src.models.weight_parametrizations import DeltaWeight
+from src.models.model_base import BaseModel
 from src.training_logger import TrainLogger
 from src.utils import dict_to_device
 
@@ -63,8 +60,11 @@ class ModularModel(BaseModel):
         # heads
         self.task_head = SwitchHead(adv_task_head, ClfHead, [self.in_size_heads]*(task_n_hidden+1), num_labels_task, dropout=task_dropout)
         self.adv_head = AdvHead(adv_count, hid_sizes=[self.in_size_heads]*(adv_n_hidden+1), num_labels=num_labels_protected, dropout=adv_dropout)
+        
+        # separate encoders
+        self.encoder_biased = self.encoder
+        self.encoder_debiased = copy.deepcopy(self.encoder_biased)
 
-        self.model_state = ModelState.INIT
         self.set_debiased(False)
 
     def _forward(self, **x) -> torch.Tensor:
@@ -89,8 +89,7 @@ class ModularModel(BaseModel):
         pred_fn_protected: Callable,
         metrics_protected: Dict[str, Callable],
         num_epochs_warmup: int,
-        num_epochs_finetune: int,
-        num_epochs_fixmask: int,
+        num_epochs: int,
         adv_lambda: float,
         learning_rate: float,
         learning_rate_bottleneck: float,
@@ -103,17 +102,11 @@ class ModularModel(BaseModel):
     ) -> None:
 
         self.global_step = 0
-        num_epochs_finetune += num_epochs_warmup
-        num_epochs_total = num_epochs_finetune + num_epochs_fixmask
-        train_steps_finetune = len(train_loader) * num_epochs_finetune
-        train_steps_fixmask = len(train_loader) * num_epochs_fixmask
-
-        self.encoder_biased = self.encoder
-        self.encoder_debiased = copy.deepcopy(self.encoder_biased)
-        self.model_state = ModelState.FINETUNING
+        num_epochs_total = num_epochs + num_epochs_warmup
+        train_steps = len(train_loader) * num_epochs_total
 
         self._init_optimizer_and_schedule(
-            train_steps_finetune,
+            train_steps,
             learning_rate,
             learning_rate_task_head,
             learning_rate_adv_head,
@@ -123,27 +116,15 @@ class ModularModel(BaseModel):
 
         self.zero_grad()
 
-        train_str = "Epoch {}, model_state: {}, {}"
+        train_str = "Epoch {}, {}"
         str_suffix = lambda d, suffix="": ", ".join([f"{k}{suffix}: {v}" for k,v in d.items()])
 
-        train_iterator = trange(num_epochs_total, desc=train_str.format(0, self.model_state, ""), leave=False, position=0)
+        train_iterator = trange(num_epochs_total, desc=train_str.format(0, ""), leave=False, position=0)
         for epoch in train_iterator:
             if epoch<num_epochs_warmup:
                 _adv_lambda = 0.
             else:
                 _adv_lambda = adv_lambda
-
-            # switch to fixed mask training
-            if epoch == num_epochs_finetune:
-                self._finetune_to_fixmask()
-                self._init_optimizer_and_schedule(
-                    train_steps_fixmask,
-                    learning_rate,
-                    learning_rate_task_head,
-                    learning_rate_adv_head,
-                    learning_rate_bottleneck,
-                    optimizer_warmup_steps
-                )
 
             self._step(
                 train_loader,
@@ -187,15 +168,15 @@ class ModularModel(BaseModel):
                 str_suffix(result_protected, "_protected")
             ])
             train_iterator.set_description(
-                train_str.format(epoch, self.model_state, result_str), refresh=True
+                train_str.format(epoch, result_str), refresh=True
             )
 
-            if self.model_state == ModelState.FIXMASK or ((num_epochs_fixmask == 0) and (epoch >= num_epochs_warmup)):
+            if epoch >= num_epochs_warmup:
                 cpt = self.save_checkpoint(Path(output_dir), seed)
 
         self.set_debiased(True) # make sure debiasing is active at end of training
 
-        print("Final results after " + train_str.format(epoch, self.model_state, result_str))
+        print("Final results after " + train_str.format(epoch, result_str))
 
         return cpt
 
@@ -315,13 +296,10 @@ class ModularModel(BaseModel):
         except AttributeError:
             check = True
         if check:
-            if self.model_state == ModelState.FIXMASK:
-                self._activate_parametrizations(debiased)
-            elif self.model_state == ModelState.FINETUNING:
-                if debiased:
-                    self.encoder = self.encoder_debiased
-                else:
-                    self.encoder = self.encoder_biased
+            if debiased:
+                self.encoder = self.encoder_debiased
+            else:
+                self.encoder = self.encoder_biased
             self.bottleneck.switch_head(not debiased)
             if self.adv_task_head:
                 self.task_head.switch_head(not debiased)
@@ -352,11 +330,7 @@ class ModularModel(BaseModel):
             {
                 "params": self.adv_head.parameters(),
                 "lr": learning_rate_adv_head
-            }
-        ]
-
-        if self.model_state == ModelState.FINETUNING:
-            optimizer_params.extend([
+            },
             {
                 "params": self.encoder_biased.parameters(),
                 "lr": learning_rate                
@@ -364,13 +338,8 @@ class ModularModel(BaseModel):
             {
                 "params": self.encoder_debiased.parameters(),
                 "lr": learning_rate                
-            }            
-        ])
-        elif self.model_state == ModelState.FIXMASK:
-            optimizer_params.append({
-                "params": self.encoder.parameters(),
-                "lr": learning_rate
-            })
+            }
+        ]
 
         self.optimizer = AdamW(optimizer_params, betas=(0.9, 0.999), eps=1e-08)
 
@@ -397,22 +366,12 @@ class ModularModel(BaseModel):
             "bottleneck": self.has_bottleneck,
             "bottleneck_dim": self.bottleneck_dim,
             "bottleneck_dropout": self.bottleneck_dropout,
-            "model_state": self.model_state,
             "bottleneck_state_dict": self.bottleneck.state_dict(),
             "task_head_state_dict": self.task_head.state_dict(),
-            "adv_head_state_dict": self.adv_head.state_dict()
+            "adv_head_state_dict": self.adv_head.state_dict(),
+            "encoder_biased_state_dict": self.encoder_biased.state_dict(),
+            "encoder_debiased_state_dict": self.encoder_debiased.state_dict()
         }
-
-        d = {}
-        if self.model_state == ModelState.FINETUNING:
-            self.encoder = self.encoder_biased
-            d["encoder_biased_state_dict"] = self.encoder_module.state_dict()
-            self.encoder = self.encoder_debiased
-            d["encoder_debiased_state_dict"] = self.encoder_module.state_dict()
-            self.set_debiased(self._debiased)
-        elif self.model_state == ModelState.FIXMASK:
-            d["encoder_state_dict"] = self.encoder_module.state_dict()
-        info_dict = {**info_dict, **d}
         
         output_dir = Path(output_dir)
         output_dir.mkdir(parents=True, exist_ok=True)
@@ -420,7 +379,6 @@ class ModularModel(BaseModel):
         filename_parts = [
             self.model_name.split('/')[-1],
             "modular_baseline",
-            "separate_encoders" if (self.model_state == ModelState.FINETUNING) else None,
             "merged_head" if not self.adv_task_head else None,
             f"seed{seed}" if seed is not None else None
         ]
@@ -434,7 +392,6 @@ class ModularModel(BaseModel):
     def load_checkpoint(
         cls,
         filepath: Union[str, os.PathLike],
-        remove_parametrizations: bool = False,
         debiased: bool = True,
         map_location: Union[str, torch.device] = torch.device('cpu')
     ) -> torch.nn.Module:
@@ -455,64 +412,17 @@ class ModularModel(BaseModel):
             info_dict['bottleneck_dropout']
         )
 
-        if info_dict['model_state'] == ModelState.FIXMASK:
-            for base_module in list(cls_instance.encoder.modules()):
-                if len(base_module._parameters)>0:
-                    for n, p in list(base_module.named_parameters()):
-                        parametrize.register_parametrization(base_module, n, DeltaWeight(torch.clone(p)))   
-            cls_instance.encoder.load_state_dict(info_dict['encoder_state_dict'])
-        else:
-            cls_instance.encoder_biased = cls_instance.encoder
-            cls_instance.encoder_debiased = copy.deepcopy(cls_instance.encoder_biased)
-            cls_instance.encoder_biased.load_state_dict(info_dict['encoder_biased_state_dict'])
-            cls_instance.encoder_debiased.load_state_dict(info_dict['encoder_debiased_state_dict'])
-        cls_instance.model_state = info_dict['model_state']  
-
+        cls_instance.encoder_biased = cls_instance.encoder
+        cls_instance.encoder_debiased = copy.deepcopy(cls_instance.encoder_biased)
+        
+        cls_instance.encoder_biased.load_state_dict(info_dict['encoder_biased_state_dict'])
+        cls_instance.encoder_debiased.load_state_dict(info_dict['encoder_debiased_state_dict'])
         cls_instance.bottleneck.load_state_dict(info_dict['bottleneck_state_dict'])
         cls_instance.adv_head.load_state_dict(info_dict['adv_head_state_dict'])
         cls_instance.task_head.load_state_dict(info_dict['task_head_state_dict'])
 
         cls_instance.set_debiased(debiased)
 
-        if remove_parametrizations and cls_instance.model_state == ModelState.FIXMASK:
-            cls_instance._remove_parametrizations()
-
         cls_instance.eval()
 
         return cls_instance
-
-
-    @torch.no_grad()
-    def _finetune_to_fixmask(self) -> None:
-        assert self.model_state == ModelState.FINETUNING, "model needs to be in finetuning state"
-        for module_name, base_module in list(self.encoder_biased.named_modules()):
-            if len(base_module._parameters)>0:
-                module_debiased = reduce(lambda x, y: getattr(x, y), [self.encoder_debiased] + module_name.split("."))
-                for n, p in list(base_module.named_parameters()):
-                    delta_weight = (getattr(module_debiased, n) - p).detach()
-                    parametrize.register_parametrization(base_module, n, DeltaWeight(delta_weight))
-        self.encoder = self.encoder_biased
-        self.encoder_biased = None
-        self.encoder_debiased = None
-        self.model_state = ModelState.FIXMASK
-
-
-    def _remove_parametrizations(self) -> None:
-        assert self.model_state == ModelState.FIXMASK, "model needs to be in fixmask state"
-        for module in list(self.encoder.modules()):
-            try:
-                for n in list(module.parametrizations):
-                    parametrize.remove_parametrizations(module, n)
-            except AttributeError:
-                pass
-        self.model_state = ModelState.INIT
-
-
-    def _activate_parametrizations(self, active: bool):
-        assert self.model_state == ModelState.FIXMASK, "model needs to be in fixmask state"
-        for module in list(self.encoder.modules()):
-            try:
-                for par_list in module.parametrizations.values():
-                    par_list[0].active = active
-            except AttributeError:
-                pass
