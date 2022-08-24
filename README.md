@@ -20,7 +20,7 @@ conda activate diff_pruning
 
 The project structure looks as follows
 
-📦debiasing_text_classification \
+📦sparse_transformers \
  ┣ 📂src \
  ┃ ┣ 📂models (directory which contains all model classes)\
  ┃ ┃ ┣ 📜model_adv.py (baseline model for adverserial training) \
@@ -69,15 +69,23 @@ python3 main.py
 
 Optional arguments with example inputs
 
-* --baseline=True \
-Run baseline or diff-pruning
-* --adv=True \
-Run adverserial training
-* --modular=True \
-Run modular architecture (overwrites adv argument)
 * --gpu_id 0 1 2 3 \
 Which gpus to run experiment on (can be multiple)
-* --debug=True \
+* --adv \
+Set if you want to run adverserial training
+* --baseline \
+Set if you want to run a baseline model instead of diff-pruning
+* --modular \
+Run modular architecture (overwrites adv argument)
+* --seed=0 \
+random seed
+* --ds="bios" \
+which dataset to run ("bios", "pan16", "hatespeech")
+* --debug \
 To verify code can run through, limits number of batches which are used to 10
-* --run_adv_attack=False \
-Set to false if you do not want to run adverserial attack after training
+* --cpu \
+Run on cpu (even if gpu is available)
+* --no_adv_attack \
+Set if you do not want to run adverserial attack after training
+* --cp_path="path_to_model" \
+Initialize encoder weights for adv training from task model
