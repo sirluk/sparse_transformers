@@ -37,6 +37,7 @@ def main():
     print(f"torch.manual_seed({base_args.seed})")
 
     device = get_device(not base_args.cpu, base_args.gpu_id)
+    print(f"Device: {device}")
 
     with open("cfg.yml", "r") as f:
         cfg = yaml.safe_load(f)

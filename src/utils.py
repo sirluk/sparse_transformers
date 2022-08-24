@@ -49,7 +49,6 @@ def get_device(gpu: bool, gpu_id: Union[int, list]) -> List[torch.device]:
         device = [torch.device(f"cuda:{int(i)}") for i in gpu_id]
     else:
         device = [torch.device("cpu")]
-    print(f"Device: {device}")
     return device
 
 

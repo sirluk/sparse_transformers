@@ -380,6 +380,7 @@ def main():
         set_dir_debug(args_train)
 
     device = get_device(not base_args.cpu, base_args.gpu_id)
+    print(f"Device: {device}")
 
     train_loader, val_loader, num_labels, num_labels_protected = get_data(args_train, ds=base_args.ds, debug=base_args.debug)
     
