@@ -1,6 +1,7 @@
 # custom
 test*.ipynb
 test*.py
+embeddings*
 logs*
 checkpoints*
 DEBUG_checkpoints*
