@@ -10,13 +10,9 @@ from torch import nn
 from torch.optim import SGD
 from torch.utils.data import DataLoader, TensorDataset
 from tqdm import tqdm, trange
+from sklearn.linear_model import LinearRegression
 
-from src.utils import set_optional_args, get_num_labels
 from src.training_logger import TrainLogger
-
-
-def normal_equation(X, Y):
-    return torch.inverse(X.T@X)@X.T@Y
 
 
 def map_analytical(train_ds, val_ds, loss_fn, train_logger):
@@ -24,10 +20,14 @@ def map_analytical(train_ds, val_ds, loss_fn, train_logger):
     X_train, Y_train, _, _ = train_ds.tensors
     X_val, Y_val, _, _ = val_ds.tensors
 
-    W = normal_equation(X_train, Y_train)
+    linear_model = LinearRegression(fit_intercept=True)
+    linear_model.fit(X_train, Y_train)
 
-    Y_hat_train = X_train@W
-    Y_hat_val = X_val@W
+    W = torch.tensor(linear_model.coef_)
+    b = torch.tensor(linear_model.intercept_)
+
+    Y_hat_train = X_train@W.T + b
+    Y_hat_val = X_val@W.T + b
 
     loss_train_analytical = loss_fn(Y_hat_train, Y_train).mean().item()
     loss_val_analytical = loss_fn(Y_hat_val, Y_val).mean().item()
@@ -49,23 +49,7 @@ def map_analytical(train_ds, val_ds, loss_fn, train_logger):
     print(f"train loss analytical: {loss_train_analytical:.3f}")
     print(f"val loss analytical: {loss_val_analytical:.3f}")
 
-    # Version with bias (doesnt work as well)
-    X_train_ = torch.cat([X_train, torch.ones((X_train.shape[0],1))], dim=1)
-    X_val_ = torch.cat([X_val, torch.ones((X_val.shape[0],1))], dim=1)
-
-    W_ = normal_equation(X_train_, Y_train)
-
-    Y_hat_train_ = X_train_@W_
-    Y_hat_val_ = X_val_@W_
-
-    loss_train_ = loss_fn(Y_hat_train_, Y_train).mean().item()
-    loss_val_ = loss_fn(Y_hat_val_, Y_val).mean().item()
-    print(f"train loss analytical (with bias): {loss_train_:.3f}")
-    print(f"val loss analytical (with bias): {loss_val_:.3f}")
-
-    # import IPython; IPython.embed(); exit(1)
-
-    return W, torch.zeros((W.shape[0],)) # placeholder for bias
+    return W, b
 
 
 def map_gradient_based(train_ds, val_ds, loss_fn, train_logger):
@@ -154,9 +138,9 @@ def main():
     parser.add_argument("--ds", type=str, default="bios", help="dataset")
     args = parser.parse_args()
 
-
-    log_dir = "../logs_linear_map"
-    emb_dir = f"../embeddings/{args.ds}/{args.model_type}"
+    log_dir = f"../logs_embeddings/{args.ds}/{args.model_type}"
+    emb_dir_in = f"/share/home/lukash/{args.ds}/{args.model_type}/embeddings"
+    emb_dir_out = f"../embeddings/{args.ds}/{args.model_type}"
     emb_types = [
         "modularFalse_baseline",
         "modularFalse_fixmask0.1",
@@ -167,15 +151,18 @@ def main():
     ]
     emb_type = emb_types[args.emb_type_id]
 
+    os.makedirs(log_dir, exist_ok=True)
+    os.makedirs(emb_dir_in, exist_ok=True)
+    os.makedirs(emb_dir_out, exist_ok=True)
 
     train_logger = TrainLogger(
         log_dir = log_dir,
-        logger_name = "_".join([x for x in emb_dir.split("/") if x!=".."]) + "_" + emb_type,
+        logger_name = "_".join([args.ds, args.model_type, emb_type]),
         logging_step = 5
     )
 
-    train_embeddings_ds = torch.load(os.path.join(emb_dir, f"train_embeddings_ds_{emb_type}.pth"))
-    val_embeddings_ds = torch.load(os.path.join(emb_dir, f"val_embeddings_ds_{emb_type}.pth"))
+    train_embeddings_ds = torch.load(os.path.join(emb_dir_in, f"train_embeddings_ds_{emb_type}.pth"))
+    val_embeddings_ds = torch.load(os.path.join(emb_dir_in, f"val_embeddings_ds_{emb_type}.pth"))
 
     loss_fn = torch.nn.MSELoss(reduction="none")
 
@@ -191,14 +178,14 @@ def main():
         train_embeddings_ds.tensors[2],
         train_embeddings_ds.tensors[3]
     )
-    torch.save(modified_train_embeddings_ds, os.path.join(emb_dir, f"train_embeddings_ds_{emb_type}_modified.pth"))
+    torch.save(modified_train_embeddings_ds, os.path.join(emb_dir_out, f"train_embeddings_ds_{emb_type}_modified.pth"))
     modified_val_embeddings_ds = TensorDataset(
         val_embeddings_ds.tensors[0],
         val_embeddings_ds.tensors[0]@W_ana + b_ana,
         val_embeddings_ds.tensors[2],
         val_embeddings_ds.tensors[3]
     )
-    torch.save(modified_val_embeddings_ds, os.path.join(emb_dir, f"val_embeddings_ds_{emb_type}_modified.pth"))
+    torch.save(modified_val_embeddings_ds, os.path.join(emb_dir_out, f"val_embeddings_ds_{emb_type}_modified.pth"))
 
 
 if __name__ == "__main__":
