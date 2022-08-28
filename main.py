@@ -363,9 +363,6 @@ def main():
     if base_args.modular:
         assert base_args.cp_path is None, "checkpoint can only be used for non-modular models"
 
-    torch.manual_seed(base_args.seed)
-    print(f"torch.manual_seed({base_args.seed})")
-
     with open("cfg.yml", "r") as f:
         cfg = yaml.safe_load(f)
     data_cfg = f"data_config_{base_args.ds}"
@@ -378,6 +375,9 @@ def main():
         set_num_epochs_debug(args_train)
         set_num_epochs_debug(args_attack)
         set_dir_debug(args_train)
+
+    torch.manual_seed(base_args.seed)
+    print(f"torch.manual_seed({base_args.seed})")
 
     device = get_device(not base_args.cpu, base_args.gpu_id)
     print(f"Device: {device}")

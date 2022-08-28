@@ -149,3 +149,7 @@ class SwitchHead(nn.Module):
 
     def assert_switch(self, first: bool):
         assert not ((not first) == len(self.heads)), "second head was selected but len(self.heads) is 1"
+
+    def reset_parameters(self):
+        for head in self.heads:
+            head.reset_parameters()

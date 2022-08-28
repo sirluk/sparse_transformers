@@ -33,12 +33,6 @@ def main():
     parser.add_argument("--cpu", type=bool, default=False, help="Run on cpu")
     base_args, optional = parser.parse_known_args()
 
-    torch.manual_seed(base_args.seed)
-    print(f"torch.manual_seed({base_args.seed})")
-
-    device = get_device(not base_args.cpu, base_args.gpu_id)
-    print(f"Device: {device}")
-
     with open("cfg.yml", "r") as f:
         cfg = yaml.safe_load(f)
     data_cfg = f"data_config_{base_args.ds}"
@@ -49,6 +43,12 @@ def main():
     if base_args.debug:
         set_num_epochs_debug(args_train)
         set_dir_debug(args_train)
+
+    torch.manual_seed(base_args.seed)
+    print(f"torch.manual_seed({base_args.seed})")
+
+    device = get_device(not base_args.cpu, base_args.gpu_id)
+    print(f"Device: {device}")
 
     train_loader, eval_loader, num_labels, num_labels_protected = get_data(args_train, ds=base_args.ds, debug=base_args.debug)
 

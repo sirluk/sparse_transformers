@@ -86,9 +86,6 @@ def main():
     parser.add_argument("--no_adv_attack", action="store_true", help="Set if you do not want to run adverserial attack after training")
     base_args, optional = parser.parse_known_args()
 
-    torch.manual_seed(base_args.seed)
-    print(f"torch.manual_seed({base_args.seed})")
-
     with open("cfg.yml", "r") as f:
         cfg = yaml.safe_load(f)
     data_cfg = f"data_config_{base_args.ds}"
@@ -101,6 +98,9 @@ def main():
         set_num_epochs_debug(args_train)
         set_num_epochs_debug(args_attack)
         set_dir_debug(args_train)
+
+    torch.manual_seed(base_args.seed)
+    print(f"torch.manual_seed({base_args.seed})")
 
     device = get_device(not base_args.cpu, base_args.gpu_id)
     print(f"Device: {device}")
