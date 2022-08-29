@@ -130,13 +130,14 @@ def main_wrapper(args):
     datasets = ["bios", "pan16"]
 
     combs = [{**comb[0], "seed": comb[1], "ds": comb[2]} for comb in itertools.product(combs, seeds, datasets)]
-    combs["model_type"] = args.model_type
-    combs["cpu"] = args.cpu
-    combs["gpu_id"] = args.gpu_id
 
     for comb in combs:
-        args = argparse.Namespace(**comb)
-        main(args)
+        comb["model_type"] = args.model_type
+        comb["cpu"] = args.cpu
+        comb["gpu_id"] = args.gpu_id
+
+        args_ = argparse.Namespace(**comb)
+        main(args_)
 
 
 if __name__ == "__main__":

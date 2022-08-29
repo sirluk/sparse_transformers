@@ -8,7 +8,7 @@ import ruamel.yaml as yaml
 import itertools
 import torch
 from torch import nn
-from torch.optim import SGD
+from torch.optim import Adam
 from torch.utils.data import DataLoader, TensorDataset
 from tqdm import tqdm, trange
 from sklearn.linear_model import LinearRegression
@@ -58,7 +58,7 @@ def map_gradient_based(train_ds, val_ds, loss_fn, train_logger):
     hparams = {
         "batch_size": 128,
         "lr": 1e-4,
-        "num_epochs": 10,
+        "num_epochs": 50,
         "seed": 0
     }
     hparams = argparse.Namespace(**hparams)
@@ -71,7 +71,7 @@ def map_gradient_based(train_ds, val_ds, loss_fn, train_logger):
     emb_size = train_ds.tensors[0].shape[1]
 
     llayer = torch.nn.Linear(emb_size, emb_size)
-    optimizer = SGD(llayer.parameters(), lr=hparams.lr)
+    optimizer = Adam(llayer.parameters(), lr=hparams.lr)
 
     train_logger.reset()
 
@@ -134,17 +134,9 @@ def map_gradient_based(train_ds, val_ds, loss_fn, train_logger):
 def main(args):
 
     log_dir = f"../logs_embeddings/{args.ds}/{args.model_type}"
-    emb_dir_in = f"/share/home/lukash/{args.ds}/{args.model_type}/embeddings"
+    # emb_dir_in = f"/share/home/lukash/{args.ds}/{args.model_type}/embeddings"
+    emb_dir_in = f"../embeddings/{args.ds}/{args.model_type}"
     emb_dir_out = f"../embeddings/{args.ds}/{args.model_type}"
-    # emb_types = [
-    #     "modularFalse_baseline",
-    #     "modularFalse_fixmask0.1",
-    #     "modularFalse_fixmask0.05",
-    #     "modularTrue_baseline",
-    #     "modularTrue_fixmask0.1",
-    #     "modularTrue_fixmask0.05"
-    # ]
-    # emb_type = emb_types[args.emb_type_id]
     emb_type = f"modular{args.modular}_{'baseline' if args.baseline else 'fixmask'}{'' if args.baseline else args.fixmask_pct}_seed{args.seed}"
 
     os.makedirs(log_dir, exist_ok=True)
@@ -166,7 +158,7 @@ def main(args):
     W_ana, b_ana = map_analytical(train_embeddings_ds, val_embeddings_ds, loss_fn, train_logger)
 
     # gradient based mapping
-    # W_grad, b_grad = map_gradient_based(train_embeddings_ds, val_embeddings_ds, loss_fn, train_logger)
+    W_grad, b_grad = map_gradient_based(train_embeddings_ds, val_embeddings_ds, loss_fn, train_logger)
 
     modified_train_embeddings_ds = TensorDataset(
         train_embeddings_ds.tensors[0],
@@ -197,11 +189,11 @@ def main_wrapper(args):
     datasets = ["bios", "pan16"]
 
     combs = [{**comb[0], "seed": comb[1], "ds": comb[2]} for comb in itertools.product(combs, seeds, datasets)]
-    combs["model_type"] = args.model_type
 
     for comb in combs:
-        args = argparse.Namespace(**comb)
-        main(args)
+        comb["model_type"] = args.model_type
+        args_ = argparse.Namespace(**comb)
+        main(args_)
 
 
 if __name__ == "__main__":
