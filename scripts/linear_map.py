@@ -5,6 +5,7 @@ import os
 import argparse
 import math
 import ruamel.yaml as yaml
+import itertools
 import torch
 from torch import nn
 from torch.optim import SGD
@@ -130,26 +131,21 @@ def map_gradient_based(train_ds, val_ds, loss_fn, train_logger):
     return llayer.weight.data, llayer.bias.data
 
 
-def main():
-
-    parser = argparse.ArgumentParser()
-    parser.add_argument("--model_type", type=str, default="bertl4", help="bertbase or bertl4")
-    parser.add_argument("--emb_type_id", type=int, help="embedding type id")
-    parser.add_argument("--ds", type=str, default="bios", help="dataset")
-    args = parser.parse_args()
+def main(args):
 
     log_dir = f"../logs_embeddings/{args.ds}/{args.model_type}"
     emb_dir_in = f"/share/home/lukash/{args.ds}/{args.model_type}/embeddings"
     emb_dir_out = f"../embeddings/{args.ds}/{args.model_type}"
-    emb_types = [
-        "modularFalse_baseline",
-        "modularFalse_fixmask0.1",
-        "modularFalse_fixmask0.05",
-        "modularTrue_baseline",
-        "modularTrue_fixmask0.1",
-        "modularTrue_fixmask0.05"
-    ]
-    emb_type = emb_types[args.emb_type_id]
+    # emb_types = [
+    #     "modularFalse_baseline",
+    #     "modularFalse_fixmask0.1",
+    #     "modularFalse_fixmask0.05",
+    #     "modularTrue_baseline",
+    #     "modularTrue_fixmask0.1",
+    #     "modularTrue_fixmask0.05"
+    # ]
+    # emb_type = emb_types[args.emb_type_id]
+    emb_type = f"modular{args.modular}_{'baseline' if args.baseline else 'fixmask'}{'' if args.baseline else args.fixmask_pct}_seed{args.seed}"
 
     os.makedirs(log_dir, exist_ok=True)
     os.makedirs(emb_dir_in, exist_ok=True)
@@ -188,6 +184,39 @@ def main():
     torch.save(modified_val_embeddings_ds, os.path.join(emb_dir_out, f"val_embeddings_ds_{emb_type}_modified.pth"))
 
 
+def main_wrapper(args):
+    combs = [
+        {"fixmask_pct": 0.1, "baseline": False, "modular": False},
+        {"fixmask_pct": 0.05, "baseline": False, "modular": False},
+        {"baseline": True, "modular": False},
+        {"fixmask_pct": 0.1, "baseline": False, "modular": True},
+        {"fixmask_pct": 0.05, "baseline": False, "modular": True},
+        {"baseline": True, "modular": True}
+    ]
+    seeds = list(range(5))
+    datasets = ["bios", "pan16"]
+
+    combs = [{**comb[0], "seed": comb[1], "ds": comb[2]} for comb in itertools.product(combs, seeds, datasets)]
+    combs["model_type"] = args.model_type
+
+    for comb in combs:
+        args = argparse.Namespace(**comb)
+        main(args)
+
+
 if __name__ == "__main__":
 
-    main()
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--model_type", type=str, default="bertl4", help="bertbase or bertl4")
+    parser.add_argument("--run_all", action="store_true", help="runs all experiments for one model type")
+    parser.add_argument("--fixmask_pct", type=float, default=0.1, help="for diff models, which sparsity percentage")
+    parser.add_argument("--baseline", action="store_true", help="Set to True if you want to run baseline models (no diff-pruning)")
+    parser.add_argument("--modular", action="store_true", help="Whether to run modular training (task only and adverserial)")
+    parser.add_argument("--seed", type=int, default=0, help="torch random seed")
+    parser.add_argument("--ds", type=str, default="bios", help="dataset")
+    args = parser.parse_args()
+
+    if args.run_all:
+        main_wrapper(args)
+    else:
+        main(args)

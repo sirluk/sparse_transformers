@@ -4,6 +4,7 @@ sys.path.insert(0,'..')
 import os
 import argparse
 import ruamel.yaml as yaml
+import itertools
 import torch
 from torch import nn
 from torch.utils.data import DataLoader, TensorDataset
@@ -49,7 +50,7 @@ def generate_embeddings(trainer_biased: nn.Module, trainer_debiased: nn.Module, 
 
 
 def get_models(base_args):
-    model_path = MODEL_PATH.format(base_args.ds, 'bertbase' if base_args.bertbase else 'bertl4')
+    model_path = MODEL_PATH.format(base_args.ds, base_args.model_type)
     if base_args.modular:
         if base_args.baseline:
             model_name = f'bert_uncased_L-4_H-256_A-4-modular_baseline-seed{base_args.seed}.pt'
@@ -74,8 +75,8 @@ def get_models(base_args):
 
 
 def get_embeddings(base_args, args_train):
-    emb_dir = os.path.join("..", "embeddings", base_args.ds, 'bertbase' if base_args.bertbase else 'bertl4')
-    emb_type = f"modular{base_args.modular}_{'baseline' if base_args.baseline else 'fixmask'}{'' if base_args.baseline else base_args.fixmask_pct}"
+    emb_dir = os.path.join("..", "embeddings", base_args.ds, base_args.model_type)
+    emb_type = f"modular{base_args.modular}_{'baseline' if base_args.baseline else 'fixmask'}{'' if base_args.baseline else base_args.fixmask_pct}_seed{base_args.seed}"
     try:
         train_embeddings_ds = torch.load(os.path.join(emb_dir, f"train_embeddings_ds_{emb_type}.pth"))
         val_embeddings_ds = torch.load(os.path.join(emb_dir, f"val_embeddings_ds_{emb_type}.pth"))
@@ -85,7 +86,7 @@ def get_embeddings(base_args, args_train):
         device = get_device(not base_args.cpu, base_args.gpu_id)
         print(f"Device: {device}")
 
-        train_loader, val_loader, num_labels, num_labels_protected = get_data(args_train, ds=base_args.ds, debug=False)
+        train_loader, val_loader, _, _ = get_data(args_train, ds=base_args.ds, debug=False)
         model_biased, model_debiased = get_models(base_args)
         model_biased.to(device)
         model_debiased.to(device)
@@ -106,29 +107,54 @@ def get_embeddings(base_args, args_train):
     return train_embeddings_ds, val_embeddings_ds
 
 
-def main():
-
-    parser = argparse.ArgumentParser()
-    parser.add_argument("--bertbase", action="store_true", help="bertbase instead of bertl4")
-    parser.add_argument("--fixmask_pct", type=float, default=0.1, help="for diff models, which sparsity percentage")
-    parser.add_argument("--gpu_id", nargs="*", type=int, default=[0], help="")
-    parser.add_argument("--baseline", action="store_true", help="Set to True if you want to run baseline models (no diff-pruning)")
-    parser.add_argument("--modular", action="store_true", help="Whether to run modular training (task only and adverserial)")
-    parser.add_argument("--seed", type=int, default=0, help="torch random seed")
-    parser.add_argument("--ds", type=str, default="bios", help="dataset")
-    parser.add_argument("--cpu", action="store_true", help="Run on cpu")
-    base_args, optional = parser.parse_known_args()
+def main(base_args):
 
     with open(os.path.join("..", "cfg.yml"), "r") as f:
         cfg = yaml.safe_load(f)
     data_cfg = f"data_config_{base_args.ds}"
     args_train = argparse.Namespace(**cfg[data_cfg], **cfg["model_config"])
 
-    set_optional_args(args_train, optional)
-
     return get_embeddings(base_args, args_train)
+
+
+def main_wrapper(args):
+    combs = [
+        {"fixmask_pct": 0.1, "baseline": False, "modular": False},
+        {"fixmask_pct": 0.05, "baseline": False, "modular": False},
+        {"baseline": True, "modular": False},
+        {"fixmask_pct": 0.1, "baseline": False, "modular": True},
+        {"fixmask_pct": 0.05, "baseline": False, "modular": True},
+        {"baseline": True, "modular": True}
+    ]
+    seeds = list(range(5))
+    datasets = ["bios", "pan16"]
+
+    combs = [{**comb[0], "seed": comb[1], "ds": comb[2]} for comb in itertools.product(combs, seeds, datasets)]
+    combs["model_type"] = args.model_type
+    combs["cpu"] = args.cpu
+    combs["gpu_id"] = args.gpu_id
+
+    for comb in combs:
+        args = argparse.Namespace(**comb)
+        main(args)
 
 
 if __name__ == "__main__":
 
-    main()
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--model_type", type=str, default="bertl4", help="bertbase or bertl4")
+    parser.add_argument("--gpu_id", nargs="*", type=int, default=[0], help="")
+    parser.add_argument("--cpu", action="store_true", help="Run on cpu")
+    parser.add_argument("--run_all", action="store_true", help="runs all experiments for one model type")
+    parser.add_argument("--fixmask_pct", type=float, default=0.1, help="for diff models, which sparsity percentage")
+    parser.add_argument("--baseline", action="store_true", help="Set to True if you want to run baseline models (no diff-pruning)")
+    parser.add_argument("--modular", action="store_true", help="Whether to run modular training (task only and adverserial)")
+    parser.add_argument("--seed", type=int, default=0, help="torch random seed")
+    parser.add_argument("--ds", type=str, default="bios", help="dataset")
+    
+    args = parser.parse_args()
+
+    if args.run_all:
+        main_wrapper(args)
+    else:
+        main(args)
