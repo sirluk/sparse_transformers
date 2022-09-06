@@ -1,6 +1,10 @@
+import os
 import pickle
 import torch
 from torch.utils.data import TensorDataset, DataLoader, Dataset
+from tokenizers import Tokenizer
+
+from typing import Union
 
 
 class TextDS(Dataset):
@@ -45,17 +49,17 @@ def read_label_file(filepath):
 
 
 def _get_data_loader(
-    task_key,
-    protected_key,
-    text_key,
-    tokenizer,
-    data_path,
-    labels_task_path,
-    labels_prot_path=None,
-    batch_size=16,
-    max_length=200,
-    shuffle=True,
-    debug=False
+    task_key: str,
+    protected_key: Union[str, list],
+    text_key: str,
+    tokenizer: Tokenizer,
+    data_path: Union[str, os.PathLike],
+    labels_task_path: Union[str, os.PathLike],
+    labels_prot_path: Union[None, str, os.PathLike, list] = None,
+    batch_size: int = 16,
+    max_length: int = 200,
+    shuffle: bool = True,
+    debug: bool = False
 ):
 
     def batch_fn(batch):
@@ -77,6 +81,22 @@ def _get_data_loader(
         }
         return x, labels_task, labels_prot
 
+
+    def batch_fn_prot_multiple(batch):
+        # b = input_ids, token_type_ids, attention_masks, labels_task, labels_prot1, labels_prot2, ...
+        b = [torch.stack(l) for l in zip(*batch)]
+        x = {
+            "input_ids": b[0],
+            "token_type_ids": b[1],
+            "attention_mask": b[2]
+        }
+        return x, b[3], b[4:]
+
+
+    if isinstance(protected_key, str):
+        protected_key = [protected_key]
+        labels_prot_path = [labels_prot_path]
+
     with open(data_path, 'rb') as file:
         data_dicts = pickle.load(file)
 
@@ -84,7 +104,7 @@ def _get_data_loader(
         cutoff = min(int(batch_size*10), len(data_dicts))
         data_dicts = data_dicts[:cutoff]
 
-    keys = [task_key, protected_key, text_key]
+    keys = [task_key, *protected_key, text_key]
     x = [[d[k] for k in keys] for d in data_dicts]
 
     data = dict(zip(keys, zip(*x)))
@@ -101,10 +121,11 @@ def _get_data_loader(
         labels_task
     ]
 
-    if labels_prot_path:
-        labels_prot = read_label_file(labels_prot_path)
-        tds.append(torch.tensor([labels_prot[str(t)] for t in data[protected_key]], dtype=torch.long))
-        collate_fn = batch_fn_prot
+    if labels_prot_path is not None:
+        for k, f in zip(protected_key, labels_prot_path):
+            labels_prot = read_label_file(f)
+            tds.append(torch.tensor([labels_prot[str(t)] for t in data[k]], dtype=torch.long))
+            collate_fn = batch_fn_prot if len(protected_key)==1 else batch_fn_prot_multiple
     else:
         collate_fn = batch_fn
 
