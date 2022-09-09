@@ -86,7 +86,7 @@ def get_embeddings(base_args, args_train):
         device = get_device(not base_args.cpu, base_args.gpu_id)
         print(f"Device: {device}")
 
-        train_loader, val_loader, _, _ = get_data(args_train, ds=base_args.ds, debug=False)
+        train_loader, val_loader, _, _ = get_data(args_train, debug=False)
         model_biased, model_debiased = get_models(base_args)
         model_biased.to(device)
         model_debiased.to(device)

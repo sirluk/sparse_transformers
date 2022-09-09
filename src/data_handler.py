@@ -48,7 +48,7 @@ def read_label_file(filepath):
         return {v:k for k,v in enumerate([l for l in data.split("\n") if len(l)>0])}
 
 
-def _get_data_loader(
+def get_data_loader(
     task_key: str,
     protected_key: Union[str, list],
     text_key: str,
@@ -73,16 +73,6 @@ def _get_data_loader(
 
 
     def batch_fn_prot(batch):
-        input_ids, token_type_ids, attention_masks, labels_task, labels_prot = [torch.stack(l) for l in zip(*batch)]
-        x = {
-            "input_ids": input_ids,
-            "token_type_ids": token_type_ids,
-            "attention_mask": attention_masks
-        }
-        return x, labels_task, labels_prot
-
-
-    def batch_fn_prot_multiple(batch):
         # b = input_ids, token_type_ids, attention_masks, labels_task, labels_prot1, labels_prot2, ...
         b = [torch.stack(l) for l in zip(*batch)]
         x = {
@@ -90,7 +80,7 @@ def _get_data_loader(
             "token_type_ids": b[1],
             "attention_mask": b[2]
         }
-        return x, b[3], b[4:]
+        return x, *b[3:]
 
 
     if isinstance(protected_key, str):
@@ -125,7 +115,7 @@ def _get_data_loader(
         for k, f in zip(protected_key, labels_prot_path):
             labels_prot = read_label_file(f)
             tds.append(torch.tensor([labels_prot[str(t)] for t in data[k]], dtype=torch.long))
-            collate_fn = batch_fn_prot if len(protected_key)==1 else batch_fn_prot_multiple
+            collate_fn = batch_fn_prot
     else:
         collate_fn = batch_fn
 
@@ -134,78 +124,3 @@ def _get_data_loader(
     _loader = DataLoader(_dataset, shuffle=shuffle, batch_size=batch_size, drop_last=False, collate_fn=collate_fn)
 
     return _loader
-
-
-def get_data_loader_bios(
-    tokenizer,
-    data_path,
-    labels_task_path,
-    labels_prot_path=None,
-    batch_size=16,
-    max_length=200,
-    shuffle=True,
-    debug=False
-):
-    return _get_data_loader(
-        "title",
-        "gender",
-        "bio",
-        tokenizer,
-        data_path,
-        labels_task_path,
-        labels_prot_path,
-        batch_size,
-        max_length,
-        shuffle,
-        debug
-    )
-
-
-def get_data_loader_pan16(
-    tokenizer,
-    data_path,
-    labels_task_path,
-    labels_prot_path=None,
-    batch_size=16,
-    max_length=200,
-    shuffle=True,
-    debug=False
-):
-    return _get_data_loader(
-        "mention",
-        "gender",
-        "text",
-        tokenizer,
-        data_path,
-        labels_task_path,
-        labels_prot_path,
-        batch_size,
-        max_length,
-        shuffle,
-        debug
-    )
-
-
-def get_data_loader_hatespeech(
-    tokenizer,
-    data_path,
-    labels_task_path,
-    labels_prot_path=None,
-    batch_size=16,
-    max_length=200,
-    shuffle=True,
-    debug=False
-):
-    return _get_data_loader(
-        "label",
-        "dialect",
-        "tweet",
-        tokenizer,
-        data_path,
-        labels_task_path,
-        labels_prot_path,
-        batch_size,
-        max_length,
-        shuffle,
-        debug
-    )

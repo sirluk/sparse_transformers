@@ -1,4 +1,7 @@
 data_config_bios:
+    task_key: "title"
+    protected_key: "gender"
+    text_key: "bio"
     train_pkl: "/share/cp/datasets/nlp/text_classification_bias/bios/only_task_balanced/train_balanced_every_job.pkl"
     val_pkl: "/share/cp/datasets/nlp/text_classification_bias/bios/only_task_balanced/val.pkl"
     test_pkl: "/share/cp/datasets/nlp/text_classification_bias/bios/only_task_balanced/test.pkl"
@@ -7,7 +10,11 @@ data_config_bios:
     output_dir: "checkpoints_bios"
     log_dir: "logs_bios"
 data_config_pan16:
-    train_pkl: "/share/cp/datasets/nlp/text_classification_bias/pan16_prep/train_balanced.pkl"
+    task_key: "mention"
+    protected_key: "gender"
+    protected_key2: "age"
+    text_key: "text"
+    train_pkl: "/share/cp/datasets/nlp/text_classification_bias/pan16_prep/train_balanced_gender.pkl"
     val_pkl: "/share/cp/datasets/nlp/text_classification_bias/pan16_prep/test.pkl"
     test_pkl: "/share/cp/datasets/nlp/text_classification_bias/pan16_prep/test.pkl"
     labels_protected_path: "/share/cp/datasets/nlp/text_classification_bias/pan16_prep/labels_protected_gender.txt"
@@ -16,6 +23,9 @@ data_config_pan16:
     output_dir: "checkpoints_pan16"
     log_dir: "logs_pan16"
 data_config_hatespeech:
+    task_key: "label"
+    protected_key: "dialect"
+    text_key: "tweet"
     train_pkl: "/share/cp/datasets/nlp/hate_speech/Twitter/AAEpredicted/pickle_format/train.pkl"
     val_pkl: "/share/cp/datasets/nlp/hate_speech/Twitter/AAEpredicted/pickle_format/val.pkl"
     test_pkl: "/share/cp/datasets/nlp/hate_speech/Twitter/AAEpredicted/pickle_format/test.pkl"

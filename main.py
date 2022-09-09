@@ -382,7 +382,7 @@ def main():
     device = get_device(not base_args.cpu, base_args.gpu_id)
     print(f"Device: {device}")
 
-    train_loader, val_loader, num_labels, num_labels_protected = get_data(args_train, ds=base_args.ds, debug=base_args.debug)
+    train_loader, val_loader, num_labels, num_labels_protected = get_data(args_train, debug=base_args.debug)
     
     train_logger = get_logger(base_args.baseline, base_args.adv, base_args.modular, args_train, base_args.debug, (base_args.cp_path is not None), base_args.seed)
 

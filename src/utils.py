@@ -8,9 +8,7 @@ from transformers import AutoTokenizer
 from typing import Union, List, Tuple, Callable, Dict, Optional
 
 from src.data_handler import (
-    get_data_loader_bios,
-    get_data_loader_hatespeech,
-    get_data_loader_pan16,
+    get_data_loader,
     read_label_file
 )
 from src.training_logger import TrainLogger
@@ -68,19 +66,15 @@ def set_dir_debug(args_obj: argparse.Namespace) -> argparse.Namespace:
     return args_obj
 
 
-def get_data(args_train: argparse.Namespace, ds: str, debug: bool = False) -> Tuple[DataLoader, DataLoader, int, int]:
-
-    ds_factory = {
-        "bios": get_data_loader_bios,
-        "pan16": get_data_loader_pan16,
-        "hatespeech": get_data_loader_hatespeech
-    }
-    get_data_loader = ds_factory[ds]
+def get_data(args_train: argparse.Namespace, debug: bool = False) -> Tuple[DataLoader, DataLoader, int, int]:
 
     num_labels = get_num_labels(args_train.labels_task_path)
     num_labels_protected = get_num_labels(args_train.labels_protected_path)
     tokenizer = AutoTokenizer.from_pretrained(args_train.model_name)
     train_loader = get_data_loader(
+        task_key = args_train.task_key,
+        protected_key = args_train.protected_key,
+        text_key = args_train.text_key,
         tokenizer = tokenizer,
         data_path = args_train.train_pkl,
         labels_task_path = args_train.labels_task_path,
@@ -90,6 +84,9 @@ def get_data(args_train: argparse.Namespace, ds: str, debug: bool = False) -> Tu
         debug = debug
     )
     val_loader = get_data_loader(
+        task_key = args_train.task_key,
+        protected_key = args_train.protected_key,
+        text_key = args_train.text_key,
         tokenizer = tokenizer,
         data_path = args_train.val_pkl,
         labels_task_path = args_train.labels_task_path,
@@ -109,7 +106,8 @@ def get_name_for_run(
     args_train: argparse.Namespace,
     debug: bool = False,
     cp_path: Optional[bool] = False,
-    seed: Optional[int] = None
+    seed: Optional[int] = None,
+    suffix: Optional[str] = None
 ):
     run_parts = ["DEBUG" if debug else None]
     if modular:
@@ -137,6 +135,7 @@ def get_name_for_run(
         str(args_train.batch_size),
         str(args_train.learning_rate),
         "cp_init" if cp_path else None,
+        suffix,
         f"seed{seed}" if seed is not None else None
     ])
     run_name = "-".join([x for x in run_parts if x is not None])
@@ -150,12 +149,13 @@ def get_logger(
     args_train: argparse.Namespace,
     debug: bool = False,
     cp_path: Optional[bool] = False,
-    seed: Optional[int] = None
+    seed: Optional[int] = None,
+    suffix: Optional[str] = None,
 ) -> TrainLogger:
 
     log_dir = Path(args_train.log_dir)
     log_dir.mkdir(parents=True, exist_ok=True)
-    logger_name = get_name_for_run(baseline, adv, modular, args_train, debug, cp_path, seed)
+    logger_name = get_name_for_run(baseline, adv, modular, args_train, debug, cp_path, seed, suffix)
     return TrainLogger(
         log_dir = log_dir,
         logger_name = logger_name,

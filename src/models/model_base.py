@@ -2,6 +2,7 @@ import os
 import math
 from enum import Enum, auto
 from tqdm import tqdm
+from functools import reduce
 import contextlib
 import torch
 from torch.utils.data import DataLoader
@@ -317,7 +318,7 @@ class BasePruningModel(BaseModel):
             self.model_state = ModelState.FINETUNING
 
 
-    def _activate_parametrizations(self, active: bool, idx):
+    def _activate_parametrizations(self, active: bool, idx: int):
         for base_module in self.get_encoder_base_modules():
             try:
                 for par_list in base_module.parametrizations.values():
@@ -463,3 +464,44 @@ class BasePruningModel(BaseModel):
         if tmp_state: self.eval()
         yield
         if tmp_state: self.train()
+
+
+    def _as_module(self, named_parameter_list: list):
+        new_model = AutoModel.from_pretrained(self.model_name)
+        with torch.no_grad():
+            for p_name, p in named_parameter_list:
+                _p = reduce(lambda a,b: getattr(a,b), [new_model] + p_name.split("."))
+                _p.copy_(p)
+        return new_model        
+
+
+    def get_diff_weights(self, idx: int, as_module: bool = False):
+        res = []
+        p_names = [n[:-9] for n, _ in self.encoder.named_parameters() if n[-9:]==".original"]
+        with torch.no_grad():
+            for p_name in p_names:
+                par_list = reduce(lambda a,b: getattr(a,b), [self.encoder] + p_name.split("."))
+                par = par_list[idx]
+                if isinstance(par, DiffWeightFixmask):
+                    diff_weight = par.diff_weight
+                elif isinstance(par, DiffWeightFinetune):
+                    w = par_list.original.detach()
+                    diff_weight = par.diff_weight(w)
+                res.append((p_name.replace(".parametrizations", ""), diff_weight))
+
+        if as_module:
+            return self._as_module(res)
+        else:
+            return res
+
+        
+    def get_base_weights(self, as_module: bool = False):
+        if self.parametrized:
+            res = [(n[:-9].replace(".parametrizations", ""), p) for n,p in self.encoder.named_parameters() if n[-9:]==".original"]
+        else:
+            res = list(self.encoder.named_parameters())
+
+        if as_module:
+            return self._as_module(res)
+        else:
+            return res

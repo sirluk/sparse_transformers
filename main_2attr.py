@@ -1,32 +1,71 @@
-from pathlib import Path
 import argparse
 import ruamel.yaml as yaml
 import torch
+from torch.utils.data import DataLoader
+from transformers import AutoTokenizer
 
-from src.models.model_doublediff import DoubleDiffModel
+from src.models.model_diff_modular_2attr import ModularDiffModel_2attr
 from src.adv_attack import adv_attack
-from src.training_logger import TrainLogger
+from src.data_handler import get_data_loader
 from src.utils import (
     get_device,
     set_num_epochs_debug,
     set_dir_debug,
     get_data,
+    get_logger,
     get_callables,
-    set_optional_args
+    set_optional_args,
+    get_num_labels
 )
 
-torch.manual_seed(0)
+from typing import Tuple
 
 
-def train_doublediff_pruning(device, train_loader, val_loader, num_labels, num_labels_protected, train_logger, args_train, seed = None):
+def get_data(args_train: argparse.Namespace, debug: bool = False) -> Tuple[DataLoader, DataLoader, int, int]:
+
+    num_labels = get_num_labels(args_train.labels_task_path)
+    num_labels_protected = get_num_labels(args_train.labels_protected_path)
+    num_labels_protected2 = get_num_labels(args_train.labels_protected_path2)
+    tokenizer = AutoTokenizer.from_pretrained(args_train.model_name)
+    train_loader = get_data_loader(
+        task_key = args_train.task_key,
+        protected_key = [args_train.protected_key, args_train.protected_key2],
+        text_key = args_train.text_key,
+        tokenizer = tokenizer,
+        data_path = args_train.train_pkl,
+        labels_task_path = args_train.labels_task_path,
+        labels_prot_path = [args_train.labels_protected_path, args_train.labels_protected_path2],
+        batch_size = args_train.batch_size,
+        max_length = 200,
+        debug = debug
+    )
+    val_loader = get_data_loader(
+        task_key = args_train.task_key,
+        protected_key = [args_train.protected_key, args_train.protected_key2],
+        text_key = args_train.text_key,
+        tokenizer = tokenizer,
+        data_path = args_train.val_pkl,
+        labels_task_path = args_train.labels_task_path,
+        labels_prot_path = [args_train.labels_protected_path, args_train.labels_protected_path2],
+        batch_size = args_train.batch_size,
+        max_length = 200,
+        shuffle = False,
+        debug = debug
+    )
+    return train_loader, val_loader, num_labels, num_labels_protected, num_labels_protected2
+
+
+def train(device, train_loader, val_loader, num_labels, num_labels_protected, num_labels_protected2, train_logger, args_train, seed = None):
 
     loss_fn, pred_fn, metrics = get_callables(num_labels)
     loss_fn_protected, pred_fn_protected, metrics_protected = get_callables(num_labels_protected)
+    loss_fn_protected2, pred_fn_protected2, metrics_protected2 = get_callables(num_labels_protected2)
 
-    trainer = DoubleDiffModel(
+    trainer = ModularDiffModel_2attr(
         model_name = args_train.model_name,
         num_labels_task = num_labels,
         num_labels_protected = num_labels_protected,
+        num_labels_protected2 = num_labels_protected2,
         task_dropout = args_train.task_dropout,
         task_n_hidden = args_train.task_n_hidden,
         adv_dropout = args_train.adv_dropout,
@@ -48,6 +87,9 @@ def train_doublediff_pruning(device, train_loader, val_loader, num_labels, num_l
         loss_fn_protected = loss_fn_protected,
         pred_fn_protected = pred_fn_protected,
         metrics_protected = metrics_protected,
+        loss_fn_protected2 = loss_fn_protected2,
+        pred_fn_protected2 = pred_fn_protected2,
+        metrics_protected2 = metrics_protected2,
         num_epochs_warmup = args_train.num_epochs_warmup,
         num_epochs_finetune = args_train.num_epochs_finetune,
         num_epochs_fixmask = args_train.num_epochs_fixmask,
@@ -67,13 +109,17 @@ def train_doublediff_pruning(device, train_loader, val_loader, num_labels, num_l
         weight_decay = args_train.weight_decay,
         max_grad_norm = args_train.max_grad_norm,
         output_dir = args_train.output_dir,
+        sparse_task = False,
+        merged_cutoff = args_train.modular_merged_cutoff,
+        merged_min_pct = args_train.modular_merged_min_pct,
         fixmask_pct = args_train.fixmask_pct,
         seed = seed
     )
-    trainer = DoubleDiffModel.load_checkpoint(trainer_cp)
+    trainer = ModularDiffModel_2attr.load_checkpoint(trainer_cp)
     trainer.to(device)
 
     return trainer
+
 
 def main():
 
@@ -105,28 +151,16 @@ def main():
     device = get_device(not base_args.cpu, base_args.gpu_id)
     print(f"Device: {device}")
 
-    train_loader, val_loader, num_labels, num_labels_protected = get_data(args_train, debug=base_args.debug)
-
-    log_dir = Path(args_train.log_dir)
-    log_dir.mkdir(parents=True, exist_ok=True)
-    logger_name = "-".join([x for x in [
-        "DEBUG" if base_args.debug else "",
-        f"doublediff_{args_train.fixmask_pct if args_train.num_epochs_fixmask>0 else 'no_fixmask'}",
-        f"bottleneck_{args_train.bottleneck_dim}" if args_train.bottleneck else "",
-        args_train.model_name.split('/')[-1],
-        str(args_train.batch_size),
-        str(args_train.learning_rate),
-        f"seed{base_args.seed}"
-    ] if len(x)>0])
-    train_logger = TrainLogger(
-        log_dir = log_dir,
-        logger_name = logger_name,
-        logging_step = args_train.logging_step
+    train_loader, val_loader, num_labels, num_labels_protected, num_labels_protected2 = \
+        get_data(args_train, debug=base_args.debug)
+    
+    train_logger = get_logger(
+        False, False, True, args_train, base_args.debug, False, base_args.seed, f"2attr-{args_train.protected_key}"
     )
 
     print(f"Running {train_logger.logger_name}")
 
-    trainer = train_doublediff_pruning(device, train_loader, val_loader, num_labels, num_labels_protected, train_logger, args_train)
+    trainer = train(device, train_loader, val_loader, num_labels, num_labels_protected, num_labels_protected2, train_logger, args_train, base_args.seed)
 
     if not base_args.no_adv_attack:
         loss_fn, pred_fn, metrics = get_callables(num_labels_protected)
@@ -145,7 +179,27 @@ def main():
             num_epochs = args_attack.num_epochs,
             lr = args_attack.learning_rate,
             batch_size = args_attack.attack_batch_size,
-            cooldown = args_attack.cooldown
+            cooldown = args_attack.cooldown,
+            logger_suffix = f"adv_attack_unbiased"
+        )
+        trainer.set_debiased(False)
+        adv_attack(
+            trainer = trainer,
+            train_loader = train_loader,
+            val_loader = val_loader,
+            logger = train_logger,
+            loss_fn = loss_fn,
+            pred_fn = pred_fn,
+            metrics = metrics,
+            num_labels = num_labels_protected,
+            adv_n_hidden = args_attack.adv_n_hidden,
+            adv_count = args_attack.adv_count,
+            adv_dropout = args_attack.adv_dropout,
+            num_epochs = args_attack.num_epochs,
+            lr = args_attack.learning_rate,
+            batch_size = args_attack.attack_batch_size,
+            cooldown = args_attack.cooldown,
+            logger_suffix = "adv_attack_biased"
         )
 
 

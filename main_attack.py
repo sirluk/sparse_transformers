@@ -50,7 +50,7 @@ def main():
     device = get_device(not base_args.cpu, base_args.gpu_id)
     print(f"Device: {device}")
 
-    train_loader, eval_loader, num_labels, num_labels_protected = get_data(args_train, ds=base_args.ds, debug=base_args.debug)
+    train_loader, eval_loader, num_labels, num_labels_protected = get_data(args_train, debug=base_args.debug)
 
     ### DEFINE MANUALLY
     # cp_dir = "/share/home/lukash/checkpoints_bert_L4/seed4"

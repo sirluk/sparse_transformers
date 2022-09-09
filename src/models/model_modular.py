@@ -3,7 +3,6 @@ import math
 import copy
 from tqdm import trange, tqdm
 from pathlib import Path
-from functools import reduce
 import torch
 from torch.utils.data import DataLoader
 from torch.optim import AdamW
