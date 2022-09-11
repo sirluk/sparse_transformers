@@ -70,6 +70,7 @@ class TaskModel(BaseModel):
         max_grad_norm: float,
         output_dir: Union[str, os.PathLike],
         cooldown: int,
+        checkpoint_name: Optional[str] = None,
         seed: Optional[int] = None
     ) -> None:
 
@@ -114,7 +115,7 @@ class TaskModel(BaseModel):
             )
 
             if logger.is_best(result["loss"], ascending=True):
-                cpt = self.save_checkpoint(Path(output_dir), seed)
+                cpt = self.save_checkpoint(Path(output_dir), checkpoint_name, seed)
                 cpt_result = result
                 cpt_epoch = epoch
                 performance_decrease_counter = 0
@@ -205,9 +206,23 @@ class TaskModel(BaseModel):
         # )
 
 
+    def make_checkpoint_name(
+        self,
+        seed: Optional[int] = None
+    ):
+        filename_parts = [
+            self.model_name.split('/')[-1],
+            "task_baseline",
+            "cp_init" if self.state_dict_init else None,
+            f"seed{seed}" if seed is not None else None
+        ]
+        return "-".join([x for x in filename_parts if x is not None]) + ".pt"
+
+
     def save_checkpoint(
         self,
         output_dir: Union[str, os.PathLike],
+        checkpoint_name: Optional[str] = None,
         seed: Optional[int] = None
     ) -> None:
         info_dict = {
@@ -226,14 +241,9 @@ class TaskModel(BaseModel):
         output_dir = Path(output_dir)
         output_dir.mkdir(parents=True, exist_ok=True)
         
-        filename_parts = [
-            self.model_name.split('/')[-1],
-            "task_baseline",
-            "cp_init" if self.state_dict_init else None,
-            f"seed{seed}" if seed is not None else None
-        ]
-        filename = "-".join([x for x in filename_parts if x is not None]) + ".pt"
-        filepath = output_dir / filename
+        if checkpoint_name is None:
+            checkpoint_name = self.make_checkpoint_name(seed)
+        filepath = output_dir / checkpoint_name
         torch.save(info_dict, filepath)
         return filepath
 

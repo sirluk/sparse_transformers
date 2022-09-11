@@ -106,6 +106,7 @@ class ModularDiffModel(BasePruningModel):
         merged_cutoff: bool,
         merged_min_pct: float,
         fixmask_pct: Optional[float] = None,
+        checkpoint_name: Optional[str] = None,
         seed: Optional[int] = None
     ) -> None:
 
@@ -235,6 +236,7 @@ class ModularDiffModel(BasePruningModel):
                     concrete_lower,
                     concrete_upper,
                     structured_diff_pruning,
+                    checkpoint_name,
                     seed
                 )
 
@@ -304,26 +306,26 @@ class ModularDiffModel(BasePruningModel):
             # START STEP TASK
             self.set_debiased(False)
 
-            loss = 0.
-            losses_biased = torch.zeros((3,))
+            loss_biased = 0.
+            partial_losses_biased = torch.zeros((2,))
             for _ in range(concrete_samples_task):
 
                 outputs = self(**inputs)
                 loss_task = loss_fn(outputs, labels_task.to(self.device))
-                loss += loss_task
+                loss_biased += loss_task
 
                 if self.finetune_state and self.sparse_task:
                     loss_l0 = self._get_sparsity_pen(log_ratio, 0)
-                    loss += loss_l0
+                    loss_biased += loss_l0
                 else:
                     loss_l0 = torch.tensor(0.)
 
-                losses_biased += torch.tensor([loss, loss_task, loss_l0]).detach()
+                partial_losses_biased += torch.tensor([loss_task, loss_l0]).detach()
 
-            loss /= concrete_samples_task
-            losses_biased /= concrete_samples_task
+            loss_biased /= concrete_samples_task
+            partial_losses_biased /= concrete_samples_task
 
-            loss.backward()
+            loss_biased.backward()
 
             torch.nn.utils.clip_grad_norm_(self.parameters(), max_grad_norm)
 
@@ -337,31 +339,31 @@ class ModularDiffModel(BasePruningModel):
             # START STEP DEBIAS
             self.set_debiased(True)
 
-            loss = 0.
-            losses_debiased = torch.zeros((4,))
+            loss_debiased = 0.
+            partial_losses_debiased = torch.zeros((3,))
             for _ in range(concrete_samples):
 
                 hidden = self._forward(**inputs)
                 outputs_task = self.task_head(hidden)
                 loss_task_adv = loss_fn(outputs_task, labels_task.to(self.device))
-                loss += loss_task_adv
+                loss_debiased += loss_task_adv
 
                 outputs_protected = self.adv_head.forward_reverse(hidden, lmbda=adv_lambda)
                 loss_protected = self._get_mean_loss(outputs_protected, labels_protected.to(self.device), loss_fn_protected)
-                loss += loss_protected
+                loss_debiased += loss_protected
 
                 if self.finetune_state:
                     loss_l0_adv = self._get_sparsity_pen(log_ratio, int(self.sparse_task))
-                    loss += loss_l0_adv
+                    loss_debiased += loss_l0_adv
                 else:
                     loss_l0_adv = torch.tensor(0.)
 
-                losses_debiased += torch.tensor([loss, loss_task_adv, loss_protected, loss_l0_adv]).detach()
+                partial_losses_debiased += torch.tensor([loss_task_adv, loss_protected, loss_l0_adv]).detach()
 
-            loss /= concrete_samples
-            losses_debiased /= concrete_samples
+            loss_debiased /= concrete_samples
+            partial_losses_debiased /= concrete_samples
 
-            loss.backward()
+            loss_debiased.backward()
 
             torch.nn.utils.clip_grad_norm_(self.parameters(), max_grad_norm)
 
@@ -374,17 +376,18 @@ class ModularDiffModel(BasePruningModel):
             # self.scheduler.step()
 
             losses_dict = {
-                "total": losses_biased[0],
-                "task": losses_biased[1],
-                "l0": losses_biased[2],
-                "total_adv": losses_debiased[0],
-                "task_adv": losses_debiased[1],
-                "protected": losses_debiased[2],
-                "l0_adv": losses_debiased[3]
+                "total": loss_biased.item() + loss_debiased.item(),
+                "total_biased": loss_biased.item(),
+                "task": partial_losses_biased[0],
+                "l0": partial_losses_biased[1],
+                "total_adv": loss_debiased.item(),
+                "task_adv": partial_losses_debiased[0],
+                "protected": partial_losses_debiased[1],
+                "l0_adv": partial_losses_debiased[2]
             }
             logger.step_loss(self.global_step, losses_dict)
 
-            epoch_iterator.set_description(epoch_str.format(step, losses_biased[0], losses_debiased[0]), refresh=True)
+            epoch_iterator.set_description(epoch_str.format(step, loss_biased.item(), loss_debiased.item()), refresh=True)
 
             self.global_step += 1
 
@@ -456,12 +459,27 @@ class ModularDiffModel(BasePruningModel):
         # )
 
 
+    def make_checkpoint_name(
+        self,
+        seed: Optional[int] = None
+    ):
+        filename_parts = [
+            self.model_name.split('/')[-1],
+            "modular_" + f"fixmask{self.fixmask_pct}" if self.fixmask_state else "diff_pruning",
+            "sparse_task" if self.sparse_task else None,
+            "merged_head" if not self.adv_task_head else None,
+            f"seed{seed}" if seed is not None else None
+        ]
+        return "-".join([x for x in filename_parts if x is not None]) + ".pt"
+
+
     def save_checkpoint(
         self,
         output_dir: Union[str, os.PathLike],
         concrete_lower: float,
         concrete_upper: float,
         structured_diff_pruning: bool,
+        checkpoint_name: Optional[str] = None,
         seed: Optional[int] = None
     ) -> None:
         info_dict = {
@@ -491,15 +509,9 @@ class ModularDiffModel(BasePruningModel):
         output_dir = Path(output_dir)
         output_dir.mkdir(parents=True, exist_ok=True)
 
-        filename_parts = [
-            self.model_name.split('/')[-1],
-            "modular_" + f"fixmask{self.fixmask_pct}" if self.fixmask_state else "diff_pruning",
-            "sparse_task" if self.sparse_task else None,
-            "merged_head" if not self.adv_task_head else None,
-            f"seed{seed}" if seed is not None else None
-        ]
-        filename = "-".join([x for x in filename_parts if x is not None]) + ".pt"
-        filepath = output_dir / filename
+        if checkpoint_name is None:
+            checkpoint_name = self.make_checkpoint_name(seed)
+        filepath = output_dir / checkpoint_name
         torch.save(info_dict, filepath)
         return filepath
 

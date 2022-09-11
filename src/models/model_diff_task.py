@@ -80,6 +80,7 @@ class TaskDiffModel(BasePruningModel):
         output_dir: Union[str, os.PathLike],
         cooldown: int,
         fixmask_pct: Optional[float] = None,
+        checkpoint_name: Optional[str] = None,
         seed: Optional[int] = None
     ) -> None:
 
@@ -168,6 +169,7 @@ class TaskDiffModel(BasePruningModel):
                         concrete_lower,
                         concrete_upper,
                         structured_diff_pruning,
+                        checkpoint_name,
                         seed
                     )
                     cpt_result = result
@@ -222,10 +224,9 @@ class TaskDiffModel(BasePruningModel):
 
             concrete_samples = concrete_samples if self.finetune_state else 1
             
-            losses = torch.zeros((3,))
+            loss = 0.
+            partial_losses = torch.zeros((2,))
             for _ in range(concrete_samples):
-
-                loss = 0.
 
                 outputs = self(**inputs)
                 loss_task = loss_fn(outputs, labels.to(self.device))
@@ -237,10 +238,11 @@ class TaskDiffModel(BasePruningModel):
                 else:
                     loss_l0 = torch.tensor(0.)
 
-                losses += torch.tensor([loss, loss_task, loss_l0]).detach()
+                partial_losses += torch.tensor([loss_task, loss_l0]).detach()
 
-                loss /= concrete_samples
-                loss.backward()
+            loss /= concrete_samples
+            partial_losses /= concrete_samples
+            loss.backward()
 
             torch.nn.utils.clip_grad_norm_(self.parameters(), max_grad_norm)
 
@@ -248,11 +250,14 @@ class TaskDiffModel(BasePruningModel):
             # self.scheduler.step()
             self.zero_grad()
 
-            losses /= concrete_samples
-            losses_dict = dict(zip(["total", "task_adv", "l0_adv"], losses.tolist()))
+            losses_dict = {
+                "total": loss.item(),
+                "task": partial_losses[0],
+                "l0": partial_losses[1]
+            }
             logger.step_loss(self.global_step, losses_dict)
 
-            epoch_iterator.set_description(epoch_str.format(step, losses[0], losses[2]), refresh=True)
+            epoch_iterator.set_description(epoch_str.format(step, loss.item(), partial_losses[1]), refresh=True)
 
             self.global_step += 1
 
@@ -290,12 +295,26 @@ class TaskDiffModel(BasePruningModel):
         # )
 
 
+    def make_checkpoint_name(
+        self,
+        seed: Optional[int] = None
+    ):
+        filename_parts = [
+            self.model_name.split('/')[-1],
+            "task_" + f"fixmask{self.fixmask_pct}" if self.fixmask_state else "diff_pruning",
+            "cp_init" if self.state_dict_init else None,
+            f"seed{seed}" if seed is not None else None
+        ]
+        return "-".join([x for x in filename_parts if x is not None]) + ".pt"
+
+
     def save_checkpoint(
         self,
         output_dir: Union[str, os.PathLike],
         concrete_lower: float,
         concrete_upper: float,
         structured_diff_pruning: bool,
+        checkpoint_name: Optional[str] = None,
         seed: Optional[int] = None
     ) -> None:
         info_dict = {
@@ -318,14 +337,9 @@ class TaskDiffModel(BasePruningModel):
         output_dir = Path(output_dir)
         output_dir.mkdir(parents=True, exist_ok=True)
 
-        filename_parts = [
-            self.model_name.split('/')[-1],
-            "task_" + f"fixmask{self.fixmask_pct}" if self.fixmask_state else "diff_pruning",
-            "cp_init" if self.state_dict_init else None,
-            f"seed{seed}" if seed is not None else None
-        ]
-        filename = "-".join([x for x in filename_parts if x is not None]) + ".pt"
-        filepath = output_dir / filename
+        if checkpoint_name is None:
+            checkpoint_name = self.make_checkpoint_name(seed)
+        filepath = output_dir / checkpoint_name
         torch.save(info_dict, filepath)
         return filepath
 

@@ -6,7 +6,6 @@ import torch
 from torch.utils.data import DataLoader
 from torch.optim import AdamW
 from transformers import get_linear_schedule_with_warmup
-from collections import OrderedDict
 
 from typing import Union, Callable, Dict, Optional
 
@@ -31,10 +30,9 @@ class AdvModel(BaseModel):
         bottleneck: bool = False,
         bottleneck_dim: Optional[int] = None,
         bottleneck_dropout: Optional[float] = None,
-        model_state_dict: Optional[OrderedDict] = None,
         **kwargs
     ):
-        super().__init__(model_name, model_state_dict, **kwargs)
+        super().__init__(model_name, **kwargs)
 
         self.num_labels_task = num_labels_task
         self.num_labels_protected = num_labels_protected
@@ -90,6 +88,7 @@ class AdvModel(BaseModel):
         optimizer_warmup_steps: int,
         max_grad_norm: float,
         output_dir: Union[str, os.PathLike],
+        checkpoint_name: Optional[str] = None,
         seed: Optional[int] = None
     ) -> None:
 
@@ -151,7 +150,7 @@ class AdvModel(BaseModel):
 
             train_iterator.set_description(result_str, refresh=True)
 
-            cpt = self.save_checkpoint(Path(output_dir), seed)
+            cpt = self.save_checkpoint(Path(output_dir), checkpoint_name, seed)
 
         print("Final result after " + result_str)
 
@@ -265,9 +264,22 @@ class AdvModel(BaseModel):
         # )
 
 
+    def make_checkpoint_name(
+        self,
+        seed: Optional[int] = None
+    ):
+        filename_parts = [
+            self.model_name.split('/')[-1],
+            "adv_baseline",
+            "cp_init" if self.state_dict_init else None,
+            f"seed{seed}" if seed is not None else None
+        ]
+        return "-".join([x for x in filename_parts if x is not None]) + ".pt"
+
     def save_checkpoint(
         self,
         output_dir: Union[str, os.PathLike],
+        checkpoint_name: Optional[str] = None,
         seed: Optional[int] = None
     ) -> None:
         info_dict = {
@@ -291,14 +303,9 @@ class AdvModel(BaseModel):
         output_dir = Path(output_dir)
         output_dir.mkdir(parents=True, exist_ok=True)
 
-        filename_parts = [
-            self.model_name.split('/')[-1],
-            "adv_baseline",
-            "cp_init" if self.state_dict_init else None,
-            f"seed{seed}" if seed is not None else None
-        ]
-        filename = "-".join([x for x in filename_parts if x is not None]) + ".pt"
-        filepath = output_dir / filename
+        if checkpoint_name is None:
+            checkpoint_name = self.make_checkpoint_name(seed)
+        filepath = output_dir / checkpoint_name
         torch.save(info_dict, filepath)
         return filepath
 
