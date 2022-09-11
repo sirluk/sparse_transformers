@@ -65,6 +65,8 @@ class BaseModel(torch.nn.Module):
         else:
             self.state_dict_init = False
 
+        self.in_size_heads = self.hidden_size
+
     def _forward(self, **x) -> torch.Tensor:
         return self.encoder(**x)[0][:,0]
 
