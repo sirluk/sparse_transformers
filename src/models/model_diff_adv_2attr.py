@@ -10,12 +10,13 @@ from transformers import get_linear_schedule_with_warmup
 from typing import Union, Callable, Dict, Optional
 
 from src.models.model_heads import AdvHead
-from src.models.model_diff_modular import ModularDiffModel
+from src.models.model_diff_adv import AdvDiffModel
+from src.models.model_base import ModelState
 from src.training_logger import TrainLogger
 from src.utils import dict_to_device
 
 
-class ModularDiffModel_2attr(ModularDiffModel):
+class AdvDiffModel_2attr(AdvDiffModel):
 
     def __init__(
         self,
@@ -28,7 +29,6 @@ class ModularDiffModel_2attr(ModularDiffModel):
         adv_dropout: float = .3,
         adv_n_hidden: int = 1,
         adv_count: int = 5,
-        adv_task_head: bool = True,
         bottleneck: bool = False,
         bottleneck_dim: Optional[int] = None,
         bottleneck_dropout: Optional[float] = None,
@@ -43,7 +43,6 @@ class ModularDiffModel_2attr(ModularDiffModel):
             adv_dropout,
             adv_n_hidden,
             adv_count,
-            adv_task_head,
             bottleneck,
             bottleneck_dim,
             bottleneck_dropout,
@@ -91,14 +90,10 @@ class ModularDiffModel_2attr(ModularDiffModel):
         weight_decay: float,
         max_grad_norm: float,
         output_dir: Union[str, os.PathLike],
-        sparse_task: bool,
-        merged_cutoff: bool,
-        merged_min_pct: float,
         fixmask_pct: Optional[float] = None,
+        checkpoint_name: Optional[str] = None,
         seed: Optional[int] = None
     ) -> None:
-
-        self.sparse_task = sparse_task
 
         self.global_step = 0
         num_epochs_finetune += num_epochs_warmup
@@ -112,15 +107,14 @@ class ModularDiffModel_2attr(ModularDiffModel):
 
         if not self.parametrized:
             self._add_diff_parametrizations(
-                n_parametrizations = 1 + sparse_task,
-                p_requires_grad = not sparse_task,
+                n_parametrizations = 1,
+                p_requires_grad = False,
                 alpha_init = alpha_init,
                 concrete_lower = concrete_lower,
                 concrete_upper = concrete_upper,
                 structured = structured_diff_pruning
             )
         else:
-            assert self.n_parametrizations == 1 + sparse_task, f"model has been trained with sparse_task={sparse_task}"
             assert self.finetune_state or (self.fixmask_state and num_epochs_finetune==0), "model is in fixmask state but num_epochs_fintune>0"
 
         self._init_optimizer_and_schedule(
@@ -147,12 +141,7 @@ class ModularDiffModel_2attr(ModularDiffModel):
 
             # switch to fixed mask training
             if epoch == num_epochs_finetune:
-                self._finetune_to_fixmask(
-                    fixmask_pct,
-                    n_parametrizations = (1 + sparse_task),
-                    merged_cutoff = merged_cutoff,
-                    merged_min_pct = merged_min_pct
-                )
+                self._finetune_to_fixmask(fixmask_pct)
                 self._init_optimizer_and_schedule(
                     train_steps_fixmask,
                     learning_rate,
@@ -183,25 +172,14 @@ class ModularDiffModel_2attr(ModularDiffModel):
                 metrics,
                 label_idx=1
             )
-            logger.validation_loss(epoch, result, "task")
-
-            result_debiased = self.evaluate(
-                val_loader,
-                loss_fn,
-                pred_fn,
-                metrics,
-                label_idx=1,
-                debiased=True
-            )
-            logger.validation_loss(epoch, result_debiased, suffix="task_debiased")
+            logger.validation_loss(epoch, result, suffix="task_debiased")
 
             result_protected = self.evaluate(
                 val_loader,
                 loss_fn_protected,
                 pred_fn_protected,
                 metrics_protected,
-                label_idx=2,
-                debiased=True
+                label_idx=2
             )
             logger.validation_loss(epoch, result_protected, suffix="protected")
 
@@ -210,21 +188,17 @@ class ModularDiffModel_2attr(ModularDiffModel):
                 loss_fn_protected2,
                 pred_fn_protected2,
                 metrics_protected2,
-                label_idx=3,
-                debiased=True
+                label_idx=3
             )
             logger.validation_loss(epoch, result_biased_attr, suffix="biased attr")
 
             # count non zero
-            mask_names = ["task", "adv"]
-            for i, suffix in enumerate(mask_names[(not sparse_task):]):
-                n_p, n_p_zero, n_p_one = self._count_non_zero_params(i)
-                n_p_between = n_p - (n_p_zero + n_p_one)
-                logger.non_zero_params(epoch, n_p, n_p_zero, n_p_between, suffix)
+            n_p, n_p_zero, n_p_one = self._count_non_zero_params()
+            n_p_between = n_p - (n_p_zero + n_p_one)
+            logger.non_zero_params(epoch, n_p, n_p_zero, n_p_between, "adv")
 
             result_str = ", " + ", ".join([
-                str_suffix(result, "_task"),
-                str_suffix(result_debiased, "_task_debiased"),
+                str_suffix(result, "_task_debiased"),
                 str_suffix(result_protected, "_protected"),
                 str_suffix(result_biased_attr, "_biased_attr")
             ])
@@ -238,12 +212,11 @@ class ModularDiffModel_2attr(ModularDiffModel):
                     concrete_lower,
                     concrete_upper,
                     structured_diff_pruning,
+                    checkpoint_name,
                     seed
                 )
 
-        self.set_debiased(True) # make sure debiasing is active at end of training
-
-        print("Final results after " + train_str.format(epoch, self.model_state, result_str))
+        print("Final result after " + train_str.format(epoch, self.model_state, result_str))
 
         return cpt
 
@@ -255,8 +228,7 @@ class ModularDiffModel_2attr(ModularDiffModel):
         loss_fn: Callable,
         pred_fn: Callable,
         metrics: Dict[str, Callable],
-        label_idx: int,
-        debiased: bool = False
+        label_idx: int
     ) -> dict:
         self.eval()
 
@@ -270,14 +242,7 @@ class ModularDiffModel_2attr(ModularDiffModel):
             desc = "biased attribute",
             forward_fn = lambda x: self.forward_bias(**x)
 
-        if debiased != self._debiased:
-            self.set_debiased(debiased, grad_switch=False)
-            result = self._evaluate(val_loader, forward_fn, loss_fn, pred_fn, metrics, label_idx, desc)
-            self.set_debiased((not debiased), grad_switch=False)
-        else:
-            result = self._evaluate(val_loader, forward_fn, loss_fn, pred_fn, metrics, label_idx, desc)
-
-        return result
+        return self._evaluate(val_loader, forward_fn, loss_fn, pred_fn, metrics, label_idx, desc)
 
 
     def _step(
@@ -295,7 +260,7 @@ class ModularDiffModel_2attr(ModularDiffModel):
 
         self.train()
 
-        epoch_str = "training - step {}, loss_biased: {:7.5f}, loss_debiased: {:7.5f}"
+        epoch_str = "training - step {}, loss: {:7.5f}, loss l0 pen: {:7.5f}"
         epoch_iterator = tqdm(train_loader, desc=epoch_str.format(0, math.nan, math.nan), leave=False, position=1)
         for step, batch in enumerate(epoch_iterator):
 
@@ -303,101 +268,55 @@ class ModularDiffModel_2attr(ModularDiffModel):
             inputs = dict_to_device(inputs, self.device)
 
             concrete_samples = concrete_samples if self.finetune_state else 1
-            concrete_samples_task = concrete_samples if self.sparse_task else 1
 
-            ##################################################
-            # START STEP TASK
-            self.set_debiased(False)
-
-            loss_biased = 0.
-            partial_losses_biased = torch.zeros((2,))
-            for _ in range(concrete_samples_task):
-
-                outputs = self(**inputs)
-                loss_task = loss_fn(outputs, labels_task.to(self.device))
-                loss_biased += loss_task
-
-                if self.finetune_state and self.sparse_task:
-                    loss_l0 = self._get_sparsity_pen(log_ratio, 0)
-                    loss_biased += loss_l0
-                else:
-                    loss_l0 = torch.tensor(0.)
-
-                partial_losses_biased += torch.tensor([loss_task, loss_l0]).detach()
-
-            loss_biased /= concrete_samples_task
-            partial_losses_biased /= concrete_samples_task
-
-            loss_biased.backward()
-
-            torch.nn.utils.clip_grad_norm_(self.parameters(), max_grad_norm)
-
-            self.optimizer.step()
-            self.zero_grad()
-            
-            # END STEP TASK
-            ##################################################
-
-            ##################################################
-            # START STEP DEBIAS
-            self.set_debiased(True)
-
-            loss_debiased = 0.
-            partial_losses_debiased = torch.zeros((4,))
+            loss = 0.
+            partial_losses = torch.zeros((4,))
             for _ in range(concrete_samples):
 
                 hidden = self._forward(**inputs)
                 outputs_task = self.task_head(hidden)
                 loss_task_adv = loss_fn(outputs_task, labels_task.to(self.device))
-                loss_debiased += loss_task_adv
+                loss += loss_task_adv
 
                 outputs_protected = self.adv_head.forward_reverse(hidden, lmbda=adv_lambda)
                 loss_protected = self._get_mean_loss(outputs_protected, labels_protected1.to(self.device), loss_fn_protected)
-                loss_debiased += loss_protected
+                loss += loss_protected
 
                 outputs_attr_bias = self.attr_bias_head.forward(hidden)
                 loss_attr_bias = self._get_mean_loss(outputs_attr_bias, labels_protected2.to(self.device), loss_fn_protected2)
-                loss_debiased += loss_attr_bias
+                loss += loss_attr_bias
 
                 if self.finetune_state:
-                    loss_l0_adv = self._get_sparsity_pen(log_ratio, int(self.sparse_task))
-                    loss_debiased += loss_l0_adv
+                    loss_l0_adv = self._get_sparsity_pen(log_ratio, 0)
+                    loss += loss_l0_adv
                 else:
                     loss_l0_adv = torch.tensor(0.)
 
-                partial_losses_debiased += torch.tensor([loss_task_adv, loss_protected, loss_l0_adv, loss_attr_bias]).detach()
+                partial_losses += torch.tensor([loss_task_adv, loss_protected, loss_l0_adv, loss_attr_bias]).detach()
 
-            loss_debiased /= concrete_samples
-            partial_losses_debiased /= concrete_samples
+            loss /= concrete_samples
+            partial_losses /= concrete_samples
 
-            loss_debiased.backward()
+            loss.backward()
 
             torch.nn.utils.clip_grad_norm_(self.parameters(), max_grad_norm)
 
             self.optimizer.step()
             self.zero_grad()
             
-            # END STEP DEBIAS
-            ##################################################
-
             # self.scheduler.step()
-
             losses_dict = {
-                "total": loss_biased.item() + loss_debiased.item(),
-                "total_biased": loss_biased.item(),
-                "task": partial_losses_biased[0],
-                "l0": partial_losses_biased[1],
-                "total_adv": loss_debiased.item(),
-                "task_adv": partial_losses_debiased[0],
-                "protected": partial_losses_debiased[1],
-                "l0_adv": partial_losses_debiased[2],
-                "attr_bias": partial_losses_debiased[3]
+                "total_adv": loss.item(),
+                "task_adv": partial_losses[0],
+                "protected": partial_losses[1],
+                "l0_adv": partial_losses[2],
+                "attr_bias": partial_losses[3],
             }
             logger.step_loss(self.global_step, losses_dict)
 
-            epoch_iterator.set_description(epoch_str.format(step, loss_biased.item(), loss_debiased.item()), refresh=True)
+            epoch_iterator.set_description(epoch_str.format(step, loss.item(), partial_losses[2]), refresh=True)
 
-            self.global_step += 1
+            self.global_step += 1     
 
 
     def _init_optimizer_and_schedule(
@@ -432,17 +351,8 @@ class ModularDiffModel_2attr(ModularDiffModel):
         ]
 
         optimizer_param_groups.extend(
-            self._get_diff_param_groups(learning_rate, weight_decay, learning_rate_alpha)
+            self._get_diff_param_groups(learning_rate, weight_decay, learning_rate_alpha, 0)
         )
-
-        if not self.sparse_task:
-            optimizer_param_groups.append(
-                {
-                    "params": [p for n,p in self.encoder.named_parameters() if n[-9:] == f".original"],
-                    "lr": learning_rate,
-                    "weight_decay": weight_decay
-                }                
-            )
 
         self.optimizer = AdamW(optimizer_param_groups, betas=(0.9, 0.999), eps=1e-08)
 
@@ -451,12 +361,27 @@ class ModularDiffModel_2attr(ModularDiffModel):
         # )
 
 
+    def make_checkpoint_name(
+        self,
+        seed: Optional[int] = None
+    ):
+        filename_parts = [
+            self.model_name.split('/')[-1],
+            "adv_" + f"fixmask{self.fixmask_pct}" if self.fixmask_state else "diff_pruning",
+            "attr_bias_head",
+            "cp_init" if self.state_dict_init else None,
+            f"seed{seed}" if seed is not None else None
+        ]
+        return "-".join([x for x in filename_parts if x is not None]) + ".pt"
+
+
     def save_checkpoint(
         self,
         output_dir: Union[str, os.PathLike],
         concrete_lower: float,
         concrete_upper: float,
         structured_diff_pruning: bool,
+        checkpoint_name: Optional[str] = None,
         seed: Optional[int] = None
     ) -> None:
         info_dict = {
@@ -469,11 +394,10 @@ class ModularDiffModel_2attr(ModularDiffModel):
             "adv_dropout": self.adv_dropout,
             "adv_n_hidden": self.adv_n_hidden,
             "adv_count": self.adv_count,
-            "adv_task_head": self.adv_task_head,
             "bottleneck": self.has_bottleneck,
             "bottleneck_dim": self.bottleneck_dim,
             "bottleneck_dropout": self.bottleneck_dropout,
-            "fixmask": self.fixmask_state,
+            "model_state": self.model_state,
             "encoder_state_dict": self.encoder_module.state_dict(),
             "bottleneck_state_dict": self.bottleneck.state_dict(),
             "task_head_state_dict": self.task_head.state_dict(),
@@ -481,23 +405,15 @@ class ModularDiffModel_2attr(ModularDiffModel):
             "attr_bias_head_state_dict": self.attr_bias_head.state_dict(),
             "concrete_lower": concrete_lower,
             "concrete_upper": concrete_upper,
-            "structured_diff_pruning": structured_diff_pruning,
-            "sparse_task": self.sparse_task
+            "structured_diff_pruning": structured_diff_pruning
         }
 
         output_dir = Path(output_dir)
         output_dir.mkdir(parents=True, exist_ok=True)
 
-        filename_parts = [
-            self.model_name.split('/')[-1],
-            "modular_" + f"fixmask{self.fixmask_pct}" if self.fixmask_state else "diff_pruning",
-            "attr_bias_head",
-            "sparse_task" if self.sparse_task else None,
-            "merged_head" if not self.adv_task_head else None,
-            f"seed{seed}" if seed is not None else None
-        ]
-        filename = "-".join([x for x in filename_parts if x is not None]) + ".pt"
-        filepath = output_dir / filename
+        if checkpoint_name is None:
+            checkpoint_name = self.make_checkpoint_name(seed)
+        filepath = output_dir / checkpoint_name
         torch.save(info_dict, filepath)
         return filepath
 
@@ -506,7 +422,6 @@ class ModularDiffModel_2attr(ModularDiffModel):
         cls,
         filepath: Union[str, os.PathLike],
         remove_parametrizations: bool = False,
-        debiased: bool = True,
         map_location: Union[str, torch.device] = torch.device('cpu')
     ) -> torch.nn.Module:
         info_dict = torch.load(filepath, map_location=map_location)
@@ -521,16 +436,15 @@ class ModularDiffModel_2attr(ModularDiffModel):
             info_dict['adv_dropout'],
             info_dict['adv_n_hidden'],
             info_dict['adv_count'],
-            info_dict['adv_task_head'],
             info_dict['bottleneck'],
             info_dict['bottleneck_dim'],
             info_dict['bottleneck_dropout']
         )
 
         cls_instance._add_diff_parametrizations(
-            n_parametrizations = 1 + info_dict["sparse_task"],
-            p_requires_grad = not info_dict["sparse_task"],
-            fixmask_init = info_dict["fixmask"],
+            n_parametrizations = 1,
+            p_requires_grad = False,
+            fixmask_init = (info_dict["model_state"] == ModelState.FIXMASK),
             alpha_init = 5, # standard value for alpha init, not important here as it will be overwritten by checkpoint
             concrete_lower = info_dict['concrete_lower'],
             concrete_upper = info_dict['concrete_upper'],
@@ -542,8 +456,6 @@ class ModularDiffModel_2attr(ModularDiffModel):
         cls_instance.task_head.load_state_dict(info_dict['task_head_state_dict'])
         cls_instance.adv_head.load_state_dict(info_dict['adv_head_state_dict'])
         cls_instance.attr_bias_head.load_state_dict(info_dict['attr_bias_head_state_dict'])
-
-        cls_instance.set_debiased(debiased)
 
         if remove_parametrizations:
             cls_instance._remove_parametrizations()
