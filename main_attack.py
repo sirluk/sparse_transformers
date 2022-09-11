@@ -6,7 +6,6 @@ import torch
 from src.models.model_diff_adv import AdvDiffModel
 from src.models.model_diff_task import TaskDiffModel
 from src.models.model_diff_modular import ModularDiffModel
-from src.models.model_diff_modular_legacy import ModularDiffModel as ModularDiffModelLegacy
 from src.models.model_adv import AdvModel
 from src.models.model_task import TaskModel
 from src.models.model_modular import ModularModel
@@ -99,8 +98,8 @@ def main():
         adv_dropout = args_train.adv_dropout,
         num_epochs = args_train.num_epochs,
         lr = args_train.learning_rate,
-        batch_size = args_train.attack_batch_size,
-        cooldown = args_train.cooldown
+        cooldown = args_train.cooldown,
+        batch_size = args_train.attack_batch_size
     )
 
 if __name__ == "__main__":

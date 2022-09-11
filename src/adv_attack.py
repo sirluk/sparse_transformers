@@ -6,37 +6,30 @@ from torch.optim import AdamW
 from torch.utils.data import DataLoader, TensorDataset
 from transformers import get_linear_schedule_with_warmup
 
+from src.models.model_base import BaseModel
 from src.models.model_heads import AdvHead
 from src.training_logger import TrainLogger
-from src.utils import dict_to_device
+from src.utils import generate_embeddings
 
 from typing import Callable, Dict, Optional
 
 
 @torch.no_grad()
 def get_hidden_dataloader(
-    trainer: nn.Module,
+    trainer: BaseModel,
     loader: DataLoader,
     shuffle: bool = True,
     label_idx: int = 2,
     batch_size: Optional[int] = None
 ):
-    trainer.eval()
-    hidden_list = []
-    label_list = []
-    for batch in tqdm(loader, desc="generating embeddings"):
-        inputs, labels = batch[0], batch[label_idx]
-        inputs = dict_to_device(inputs, trainer.device)
-        hidden = trainer._forward(**inputs)
-        hidden_list.append(hidden.cpu())
-        label_list.append(labels)
+    data = generate_embeddings(trainer, loader, forward_fn = lambda m, x: m._forward(**x))
     bs = loader.batch_size if batch_size is None else batch_size
-    ds = TensorDataset(torch.cat(hidden_list), torch.cat(label_list))
+    ds = TensorDataset(data[0], data[label_idx])
     return DataLoader(ds, shuffle=shuffle, batch_size=bs, drop_last=False)
 
 
 def adv_attack(
-    trainer: nn.Module,
+    trainer: BaseModel,
     train_loader: DataLoader,
     val_loader: DataLoader,
     logger: TrainLogger,
@@ -49,8 +42,9 @@ def adv_attack(
     adv_dropout: int,
     num_epochs: int,
     lr: float,
+    cooldown: int = 5,
+    create_hidden_dataloader: bool = True,
     batch_size: Optional[int] = None,
-    cooldown: Optional[int] = 5,
     logger_suffix: str = "adv_attack"
 ):
 
@@ -69,8 +63,9 @@ def adv_attack(
     #     optimizer, num_warmup_steps=0, num_training_steps=len(train_loader) * num_epochs
     # )
 
-    train_loader = get_hidden_dataloader(trainer, train_loader, batch_size=batch_size)
-    val_loader = get_hidden_dataloader(trainer, val_loader, shuffle=False, batch_size=batch_size)
+    if create_hidden_dataloader:
+        train_loader = get_hidden_dataloader(trainer, train_loader, batch_size=batch_size)
+        val_loader = get_hidden_dataloader(trainer, val_loader, shuffle=False, batch_size=batch_size)
 
     global_step = 0
     train_str = "Epoch {}, {}"

@@ -1,6 +1,8 @@
+from ast import Call
 import os
 import argparse
 from pathlib import Path
+from tqdm import tqdm
 import torch
 from torch.utils.data import DataLoader
 from transformers import AutoTokenizer
@@ -66,10 +68,27 @@ def set_dir_debug(args_obj: argparse.Namespace) -> argparse.Namespace:
     return args_obj
 
 
-def get_data(args_train: argparse.Namespace, debug: bool = False) -> Tuple[DataLoader, DataLoader, int, int]:
-
+def get_data(
+    args_train: argparse.Namespace,
+    attr_idx: int = 0,
+    use_all_attr: bool = False,
+    debug: bool = False
+) -> Tuple[DataLoader, DataLoader, int, int]:
+    
     num_labels = get_num_labels(args_train.labels_task_path)
-    num_labels_protected = get_num_labels(args_train.labels_protected_path)
+
+    if isinstance(args_train.labels_protected_path, list):
+        if use_all_attr:
+            num_labels_protected = [get_num_labels(x) for x in args_train.labels_protected_path]
+        else:
+            setattr(args_train, "labels_protected_path", args_train.labels_protected_path[attr_idx])
+            num_labels_protected = [get_num_labels(args_train.labels_protected_path)]
+    else:
+        num_labels_protected = [get_num_labels(args_train.labels_protected_path)]
+
+    if isinstance(args_train.protected_key, list) and not use_all_attr:
+        setattr(args_train, "protected_key", args_train.protected_key[attr_idx])
+
     tokenizer = AutoTokenizer.from_pretrained(args_train.model_name)
     train_loader = get_data_loader(
         task_key = args_train.task_key,
@@ -96,7 +115,7 @@ def get_data(args_train: argparse.Namespace, debug: bool = False) -> Tuple[DataL
         shuffle = False,
         debug = debug
     )
-    return train_loader, val_loader, num_labels, num_labels_protected
+    return train_loader, val_loader, num_labels, *num_labels_protected
 
 
 def get_name_for_run(
@@ -104,9 +123,10 @@ def get_name_for_run(
     adv: bool,
     modular: bool,
     args_train: argparse.Namespace,
-    debug: bool = False,
-    cp_path: Optional[bool] = False,
+    cp_path: bool = False,
+    prot_key_idx: int = 0,
     seed: Optional[int] = None,
+    debug: bool = False,
     suffix: Optional[str] = None
 ):
     run_parts = ["DEBUG" if debug else None]
@@ -135,8 +155,9 @@ def get_name_for_run(
         str(args_train.batch_size),
         str(args_train.learning_rate),
         "cp_init" if cp_path else None,
+        args_train.protected_key if isinstance(args_train.protected_key, str) else args_train.protected_key[prot_key_idx],
+        f"seed{seed}" if seed is not None else None,
         suffix,
-        f"seed{seed}" if seed is not None else None
     ])
     run_name = "-".join([x for x in run_parts if x is not None])
     return run_name
@@ -147,19 +168,35 @@ def get_logger(
     adv: bool,
     modular: bool,
     args_train: argparse.Namespace,
-    debug: bool = False,
-    cp_path: Optional[bool] = False,
+    cp_path: bool = False,
+    prot_key_idx: int = 0,
     seed: Optional[int] = None,
-    suffix: Optional[str] = None,
+    debug: bool = False,
+    suffix: Optional[str] = None
 ) -> TrainLogger:
 
     log_dir = Path(args_train.log_dir)
     log_dir.mkdir(parents=True, exist_ok=True)
-    logger_name = get_name_for_run(baseline, adv, modular, args_train, debug, cp_path, seed, suffix)
+    logger_name = get_name_for_run(baseline, adv, modular, args_train, cp_path, prot_key_idx, seed, debug, suffix)
     return TrainLogger(
         log_dir = log_dir,
         logger_name = logger_name,
         logging_step = args_train.logging_step
+    )
+
+
+def get_logger_custom(
+    log_dir: Union[str, Path],
+    logger_name: str,
+    logging_step: int = 1
+) -> TrainLogger:
+
+    log_dir = Path(log_dir)
+    log_dir.mkdir(parents=True, exist_ok=True)
+    return TrainLogger(
+        log_dir = log_dir,
+        logger_name = logger_name,
+        logging_step = logging_step
     )
 
 
@@ -196,3 +233,24 @@ def set_optional_args(args_obj: argparse.Namespace, optional_args: list) -> argp
     if len(ignored) > 0: print(f"ignored args: {ignored}")
 
     return args_obj
+
+
+@torch.no_grad()
+def generate_embeddings(
+    model: torch.nn.Module,
+    loader: DataLoader,
+    forward_fn: Callable = lambda m, x: m(**x)
+):
+    device = next(model.parameters()).device
+    model.eval()
+    emb_list = []
+    labels_list = []
+    for batch in tqdm(loader, desc="generating embeddings"):
+        inputs = batch[0]
+        inputs = dict_to_device(inputs, device)
+        emb = forward_fn(model, inputs)
+        emb_list.append(emb.cpu())
+        labels_list.append(batch[1:])
+    labels = [torch.cat(x) for x in zip(*labels_list)]
+    embeddings = torch.cat(emb_list)
+    return embeddings, *labels
