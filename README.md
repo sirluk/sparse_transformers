@@ -21,6 +21,8 @@ conda activate diff_pruning
 The project structure looks as follows
 
 📦sparse_transformers \
+ ┣ 📂analysis (jupyter notebooks for analysis of models and results) \
+ ┣ 📂scripts (additional scripts for various experiments) \
  ┣ 📂src \
  ┃ ┣ 📂models (directory which contains all model classes)\
  ┃ ┃ ┣ 📜model_adv.py (baseline model for adverserial training) \
@@ -28,8 +30,9 @@ The project structure looks as follows
  ┃ ┃ ┣ 📜model_diff_adv.py (model with 2 subnetworks for adverserial training) \
  ┃ ┃ ┣ 📜model_diff_modular.py (model with 2 subnetworks for task and adv training) \
  ┃ ┃ ┣ 📜model_diff_task.py (model with subnetwork for task training) \
- ┃ ┃ ┣ 📜model_doublediff.py (model where subnetwork for adv training is a subnetwork of the task subnetwork) \
+ ┃ ┃ ┣ 📜model_functions.py (generic functions for all model classes) \
  ┃ ┃ ┣ 📜model_heads.py (classifier and adverserial head classes) \
+ ┃ ┃ ┣ 📜model_modular.py (baseline model for modular training) \
  ┃ ┃ ┣ 📜model_task.py (baseline model for task training) \
  ┃ ┃ ┗ 📜weight_parametrizations.py (contains weight parametrizations for subnetwork training*) \
  ┃ ┣ 📜adv_attack.py (contains function to run adverserial attack) \
@@ -38,10 +41,10 @@ The project structure looks as follows
  ┃ ┣ 📜training_logger.py \
  ┃ ┗ 📜utils.py \
  ┣ 📜cfg.yml (hyperparameters)\
- ┣ 📜environment.yml (conda environment config)\
- ┣ 📜main.py (main file to run experiments with)\
- ┣ 📜main_attack.py (used to run an adverserial attack only using a model checkpoint)\
- ┣ 📜main_doublediff.py (used to run doublediff model)\
+ ┣ 📜environment.yml (conda environment config) \
+ ┣ 📜main.py (main file to run experiments with) \
+ ┣ 📜main_attack.py (used to run an adverserial attack only using a model checkpoint) \
+ ┣ 📜main_wrapper.py (used to run multiple experiments sequentially) \
  ┗ 📜readme.md
 
 \* Weight parametrizations are implemented as modules and use pytorch parametrizations functionality [LINK](https://pytorch.org/tutorials/intermediate/parametrizations.html)
@@ -81,11 +84,19 @@ Run modular architecture (overwrites adv argument)
 random seed
 * --ds="bios" \
 which dataset to run ("bios", "pan16", "hatespeech")
-* --debug \
-To verify code can run through, limits number of batches which are used to 10
 * --cpu \
 Run on cpu (even if gpu is available)
 * --no_adv_attack \
 Set if you do not want to run adverserial attack after training
 * --cp_path="path_to_model" \
-Initialize encoder weights for adv training from task model
+Overwrite pre-trained encoder weights
+* --cp_is_sd \
+Set if checkpoint is a state dict
+* --cp_model_type="TaskModel" \
+Model type from which to load encoder weights as string (not required if loading state dict directly)
+* --cp_modular_biased \
+If loading checkpoint from modular model set debiased state as false
+* --prot_key_idx=0 \
+If protected key is type list: index of key to use
+* --debug \
+To verify code can run through, limits number of batches which are used to 10
