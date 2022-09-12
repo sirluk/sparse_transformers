@@ -1,7 +1,7 @@
 from torch import nn
 from torch.autograd import Function
 
-from typing import Union
+from typing import Union, Optional
 
 
 # class GRL(Function):
@@ -40,7 +40,7 @@ class ClfHead(nn.Module):
         ['tanh', nn.Tanh()]
     ])
 
-    def __init__(self, hid_sizes: Union[int, list], num_labels: int, activation: str = 'tanh', dropout: bool = True, dropout_prob: float = 0.3):
+    def __init__(self, hid_sizes: Union[int, list], num_labels: int, activation: str = 'tanh', dropout: Optional[float] = None):
         super().__init__()
 
         if isinstance(hid_sizes, int):
@@ -57,7 +57,7 @@ class ClfHead(nn.Module):
         layers = []
         for i, (hid_size, out_size) in enumerate(zip(hid_sizes, out_sizes)):
             if dropout:
-                layers.append(nn.Dropout(dropout_prob))
+                layers.append(nn.Dropout(dropout))
             layers.extend([
                 nn.Linear(hid_size, out_size),
                 self.ACTIVATIONS[activation]
