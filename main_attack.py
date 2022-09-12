@@ -11,11 +11,11 @@ from src.models.model_task import TaskModel
 from src.models.model_modular import ModularModel
 from src.training_logger import TrainLogger
 from src.adv_attack import adv_attack
+from src.data_handler import get_data
 from src.utils import (
     get_device,
     set_num_epochs_debug,
     set_dir_debug,
-    get_data,
     get_callables,
     set_optional_args
 )

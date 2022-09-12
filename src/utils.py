@@ -1,18 +1,9 @@
-from ast import Call
-import os
 import argparse
 from pathlib import Path
-from tqdm import tqdm
 import torch
-from torch.utils.data import DataLoader
-from transformers import AutoTokenizer
 
 from typing import Union, List, Tuple, Callable, Dict, Optional
 
-from src.data_handler import (
-    get_data_loader,
-    read_label_file
-)
 from src.training_logger import TrainLogger
 from src.metrics import accuracy
 
@@ -38,11 +29,6 @@ def dict_to_device(d: dict, device: Union[str, torch.device]) -> dict:
     return {k:v.to(device) for k,v in d.items()}
 
 
-def get_num_labels(label_file: Union[str, os.PathLike]) -> int:
-    num_labels = len(read_label_file(label_file))
-    return 1 if num_labels==2 else num_labels
-
-
 def get_device(gpu: bool, gpu_id: Union[int, list]) -> List[torch.device]:
     if gpu and torch.cuda.is_available():
         if isinstance(gpu_id, int): gpu_id = [gpu_id]
@@ -66,56 +52,6 @@ def set_dir_debug(args_obj: argparse.Namespace) -> argparse.Namespace:
         v = getattr(args_obj, d)
         setattr(args_obj, d, f"DEBUG_{v}")
     return args_obj
-
-
-def get_data(
-    args_train: argparse.Namespace,
-    attr_idx: int = 0,
-    use_all_attr: bool = False,
-    debug: bool = False
-) -> Tuple[DataLoader, DataLoader, int, int]:
-    
-    num_labels = get_num_labels(args_train.labels_task_path)
-
-    if isinstance(args_train.labels_protected_path, list):
-        if use_all_attr:
-            num_labels_protected = [get_num_labels(x) for x in args_train.labels_protected_path]
-        else:
-            setattr(args_train, "labels_protected_path", args_train.labels_protected_path[attr_idx])
-            num_labels_protected = [get_num_labels(args_train.labels_protected_path)]
-    else:
-        num_labels_protected = [get_num_labels(args_train.labels_protected_path)]
-
-    if isinstance(args_train.protected_key, list) and not use_all_attr:
-        setattr(args_train, "protected_key", args_train.protected_key[attr_idx])
-
-    tokenizer = AutoTokenizer.from_pretrained(args_train.model_name)
-    train_loader = get_data_loader(
-        task_key = args_train.task_key,
-        protected_key = args_train.protected_key,
-        text_key = args_train.text_key,
-        tokenizer = tokenizer,
-        data_path = args_train.train_pkl,
-        labels_task_path = args_train.labels_task_path,
-        labels_prot_path = args_train.labels_protected_path,
-        batch_size = args_train.batch_size,
-        max_length = 200,
-        debug = debug
-    )
-    val_loader = get_data_loader(
-        task_key = args_train.task_key,
-        protected_key = args_train.protected_key,
-        text_key = args_train.text_key,
-        tokenizer = tokenizer,
-        data_path = args_train.val_pkl,
-        labels_task_path = args_train.labels_task_path,
-        labels_prot_path = args_train.labels_protected_path,
-        batch_size = args_train.batch_size,
-        max_length = 200,
-        shuffle = False,
-        debug = debug
-    )
-    return train_loader, val_loader, num_labels, *num_labels_protected
 
 
 def get_name_for_run(
@@ -233,24 +169,3 @@ def set_optional_args(args_obj: argparse.Namespace, optional_args: list) -> argp
     if len(ignored) > 0: print(f"ignored args: {ignored}")
 
     return args_obj
-
-
-@torch.no_grad()
-def generate_embeddings(
-    model: torch.nn.Module,
-    loader: DataLoader,
-    forward_fn: Callable = lambda m, x: m(**x)
-):
-    device = next(model.parameters()).device
-    model.eval()
-    emb_list = []
-    labels_list = []
-    for batch in tqdm(loader, desc="generating embeddings"):
-        inputs = batch[0]
-        inputs = dict_to_device(inputs, device)
-        emb = forward_fn(model, inputs)
-        emb_list.append(emb.cpu())
-        labels_list.append(batch[1:])
-    labels = [torch.cat(x) for x in zip(*labels_list)]
-    embeddings = torch.cat(emb_list)
-    return embeddings, *labels

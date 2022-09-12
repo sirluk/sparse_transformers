@@ -8,13 +8,13 @@ from src.models.model_diff_task import TaskDiffModel
 from src.models.model_adv import AdvModel
 from src.models.model_task import TaskModel
 from src.models.model_modular import ModularModel
-from src.models.model_functions import load_cp
+from src.model_functions import load_cp
 from src.adv_attack import adv_attack
+from src.data_handler import get_data
 from src.utils import (
     get_device,
     set_num_epochs_debug,
     set_dir_debug,
-    get_data,
     get_logger,
     get_callables,
     set_optional_args
@@ -375,7 +375,9 @@ def main():
         cp_modular_biased = base_args.cp_modular_biased
     )
 
-    train_loader, val_loader, num_labels, num_labels_protected = get_data(args_train, attr_idx = base_args.prot_key_idx, debug=base_args.debug)
+    train_loader, val_loader, num_labels, num_labels_protected = get_data(
+        args_train, attr_idx = base_args.prot_key_idx, debug = base_args.debug
+    )
     
     train_logger = get_logger(
         baseline = base_args.baseline,
@@ -392,18 +394,30 @@ def main():
 
     if base_args.baseline:
         if base_args.modular:
-            trainer = train_baseline_modular(device, train_loader, val_loader, num_labels, num_labels_protected, train_logger, args_train, encoder_state_dict, base_args.seed)
+            trainer = train_baseline_modular(
+                device, train_loader, val_loader, num_labels, num_labels_protected, train_logger, args_train, encoder_state_dict, base_args.seed
+            )
         elif base_args.adv:
-            trainer = train_baseline_adv(device, train_loader, val_loader, num_labels, num_labels_protected, train_logger, args_train, encoder_state_dict, base_args.seed)
+            trainer = train_baseline_adv(
+                device, train_loader, val_loader, num_labels, num_labels_protected, train_logger, args_train, encoder_state_dict, base_args.seed
+            )
         else:
-            trainer = train_baseline_task(device, train_loader, val_loader, num_labels, train_logger, args_train, encoder_state_dict, base_args.seed)
+            trainer = train_baseline_task(
+                device, train_loader, val_loader, num_labels, train_logger, args_train, encoder_state_dict, base_args.seed
+            )
     else:
         if base_args.modular:
-            trainer = train_diff_pruning_modular(device, train_loader, val_loader, num_labels, num_labels_protected, train_logger, args_train, encoder_state_dict, base_args.seed)
+            trainer = train_diff_pruning_modular(
+                device, train_loader, val_loader, num_labels, num_labels_protected, train_logger, args_train, encoder_state_dict, base_args.seed
+            )
         elif base_args.adv:
-            trainer = train_diff_pruning_adv(device, train_loader, val_loader, num_labels, num_labels_protected, train_logger, args_train, encoder_state_dict, base_args.seed)
+            trainer = train_diff_pruning_adv(
+                device, train_loader, val_loader, num_labels, num_labels_protected, train_logger, args_train, encoder_state_dict, base_args.seed
+            )
         else:
-            trainer = train_diff_pruning_task(device, train_loader, val_loader, num_labels, train_logger, args_train, encoder_state_dict, base_args.seed)
+            trainer = train_diff_pruning_task(
+                device, train_loader, val_loader, num_labels, train_logger, args_train, encoder_state_dict, base_args.seed
+            )
 
     if not base_args.no_adv_attack:
         loss_fn, pred_fn, metrics = get_callables(num_labels_protected)

@@ -54,14 +54,14 @@ train_config:
     learning_rate_task_head: 1e-4
     learning_rate_adv_head: 1e-4
     learning_rate_alpha: 0.1
-    task_dropout: .3
+    task_dropout: 0.3
     task_n_hidden: 0
-    adv_dropout: .3
+    adv_dropout: 0.3
     adv_n_hidden: 1
     adv_count: 5
     adv_lambda: 1.
     bottleneck_dim: 16
-    bottleneck_dropout: .3
+    bottleneck_dropout: 0.3
     optimizer_warmup_steps: 0
     sparsity_pen: 1.25e-7
     max_grad_norm: 1.0

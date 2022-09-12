@@ -1,10 +1,12 @@
 import os
 import pickle
+import argparse
 import torch
 from torch.utils.data import TensorDataset, DataLoader, Dataset
 from tokenizers import Tokenizer
+from transformers import AutoTokenizer
 
-from typing import Union
+from typing import Union, Tuple
 
 
 class TextDS(Dataset):
@@ -124,3 +126,58 @@ def get_data_loader(
     _loader = DataLoader(_dataset, shuffle=shuffle, batch_size=batch_size, drop_last=False, collate_fn=collate_fn)
 
     return _loader
+
+
+def get_num_labels(label_file: Union[str, os.PathLike]) -> int:
+    num_labels = len(read_label_file(label_file))
+    return 1 if num_labels==2 else num_labels
+
+
+def get_data(
+    args_train: argparse.Namespace,
+    attr_idx: int = 0,
+    use_all_attr: bool = False,
+    debug: bool = False
+) -> Tuple[DataLoader, DataLoader, int, int]:
+    
+    num_labels = get_num_labels(args_train.labels_task_path)
+
+    if isinstance(args_train.labels_protected_path, list):
+        if use_all_attr:
+            num_labels_protected = [get_num_labels(x) for x in args_train.labels_protected_path]
+        else:
+            setattr(args_train, "labels_protected_path", args_train.labels_protected_path[attr_idx])
+            num_labels_protected = [get_num_labels(args_train.labels_protected_path)]
+    else:
+        num_labels_protected = [get_num_labels(args_train.labels_protected_path)]
+
+    if isinstance(args_train.protected_key, list) and not use_all_attr:
+        setattr(args_train, "protected_key", args_train.protected_key[attr_idx])
+
+    tokenizer = AutoTokenizer.from_pretrained(args_train.model_name)
+    train_loader = get_data_loader(
+        task_key = args_train.task_key,
+        protected_key = args_train.protected_key,
+        text_key = args_train.text_key,
+        tokenizer = tokenizer,
+        data_path = args_train.train_pkl,
+        labels_task_path = args_train.labels_task_path,
+        labels_prot_path = args_train.labels_protected_path,
+        batch_size = args_train.batch_size,
+        max_length = 200,
+        debug = debug
+    )
+    val_loader = get_data_loader(
+        task_key = args_train.task_key,
+        protected_key = args_train.protected_key,
+        text_key = args_train.text_key,
+        tokenizer = tokenizer,
+        data_path = args_train.val_pkl,
+        labels_task_path = args_train.labels_task_path,
+        labels_prot_path = args_train.labels_protected_path,
+        batch_size = args_train.batch_size,
+        max_length = 200,
+        shuffle = False,
+        debug = debug
+    )
+    return train_loader, val_loader, num_labels, *num_labels_protected

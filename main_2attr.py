@@ -4,13 +4,13 @@ import torch
 
 from src.models.model_diff_modular_2attr import ModularDiffModel_2attr
 from src.models.model_diff_adv_2attr import AdvDiffModel_2attr
-from src.models.model_functions import load_cp
+from src.model_functions import load_cp
 from src.adv_attack import adv_attack
+from src.data_handler import get_data
 from src.utils import (
     get_device,
     set_num_epochs_debug,
     set_dir_debug,
-    get_data,
     get_logger,
     get_callables,
     set_optional_args
@@ -219,9 +219,13 @@ def main():
     print(f"Running {train_logger.logger_name}")
 
     if base_args.modular:
-        trainer = train_modular(device, train_loader, val_loader, num_labels, num_labels_protected, num_labels_protected2, train_logger, args_train, encoder_state_dict, base_args.seed)
+        trainer = train_modular(
+            device, train_loader, val_loader, num_labels, num_labels_protected, num_labels_protected2, train_logger, args_train, encoder_state_dict, base_args.seed
+        )
     else:
-        trainer = train_adv(device, train_loader, val_loader, num_labels, num_labels_protected, num_labels_protected2, train_logger, args_train, encoder_state_dict, base_args.seed)
+        trainer = train_adv(
+            device, train_loader, val_loader, num_labels, num_labels_protected, num_labels_protected2, train_logger, args_train, encoder_state_dict, base_args.seed
+        )
 
     if not base_args.no_adv_attack:
         loss_fn, pred_fn, metrics = get_callables(num_labels_protected)
