@@ -21,6 +21,10 @@ from src.utils import dict_to_device
 from typing import Optional, Union, Callable, Dict
 
 
+def get_param_from_name(model, param_name):
+    return reduce(lambda a,b: getattr(a,b), [model] + param_name.split("."))
+
+
 def merge_models(model_list: list) -> torch.nn.Module:
     # assert all weights match
     sets = [set([n for n, _ in m.named_parameters()]) for m in model_list]
@@ -37,7 +41,7 @@ def merge_models(model_list: list) -> torch.nn.Module:
         for p_name, p in model_frame.named_parameters():
             p.zero_()
             for i in range(len(model_list)):
-                p_add = reduce(lambda a,b: getattr(a,b), [model_list[i]] + p_name.split("."))
+                p_add = get_param_from_name(model_list[i], p_name)
                 p += p_add
 
     return model_frame
@@ -59,8 +63,11 @@ def merge_diff_models(
             model = m.get_diff_weights(idx, as_module=True)
             model = BaseModel(model_name, model.state_dict())
             model_list.append(model)
-    sd = base_model.encoder.state_dict() if base_model is not None else AutoModel.from_pretrained(model_name)
-    model_list.append(BaseModel(model_name, sd))
+    if base_model is None:
+        model_list.append(BaseModel(model_name))
+    else: 
+        sd = base_model.encoder.state_dict()
+        model_list.append(BaseModel(model_name, sd))
     return merge_models(model_list)
 
 
