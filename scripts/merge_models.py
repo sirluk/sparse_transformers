@@ -25,6 +25,8 @@ CP = {
     "gender": "../checkpoints_pan16/adverserial-diff_pruning_0.1-bert_uncased_L-4_H-256_A-4-64-2e-05-cp_init-gender-seed0-2attr.pt",
     "age": "../checkpoints_pan16/adverserial-diff_pruning_0.1-bert_uncased_L-4_H-256_A-4-64-2e-05-cp_init-age-seed0-2attr.pt"
 }
+LOG_DIR = "logs_merge_models"
+LOGGER_NAME = "merged_masks_model_2attr"
 MODEL_ADV_CLS = AdvDiffModel_2attr
 MODEL_TASK_CLS = TaskModel
 
@@ -36,6 +38,7 @@ model = merge_diff_models([model_gender, model_age], base_model=model_task)
 model.to(DEVICE)
 model.eval()
 
+
 with open("../cfg.yml", "r") as f:
     cfg = yaml.safe_load(f)
 data_cfg = f"data_config_{DS}"
@@ -43,8 +46,8 @@ args_train = argparse.Namespace(**cfg["train_config"], **cfg[data_cfg], **cfg["m
 args_attack = argparse.Namespace(**cfg["adv_attack"])
 
 train_logger = get_logger_custom(
-    log_dir="../logs_custom",
-    logger_name="merged_masks_model"
+    log_dir=f"../{LOG_DIR}",
+    logger_name=LOGGER_NAME
 )
 
 train_loader, val_loader, num_labels, num_labels_protected, num_labels_protected2 = \
