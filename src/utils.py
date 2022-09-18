@@ -66,13 +66,17 @@ def get_name_for_run(
     suffix: Optional[str] = None
 ):
     run_parts = ["DEBUG" if debug else None]
+    
     if modular:
         run_parts.extend([
             "modular",
             "merged_head" if not args_train.modular_adv_task_head else None
     ])
+    elif adv:
+        run_parts.append("adverserial")
     else:
-        run_parts.append("adverserial" if adv else "task")
+        run_parts.append("task")
+
     if baseline:
         run_parts.append("baseline")
     else:
@@ -84,14 +88,16 @@ def get_name_for_run(
                 "sparse_task" if args_train.modular_sparse_task else None,
                 "merged_cutoff" if args_train.modular_merged_cutoff else None
             ])
-    if args_train.bottleneck:
-        run_parts.append(f"bottleneck_{args_train.bottleneck_dim}")
+
+    prot_attr = args_train.protected_key if isinstance(args_train.protected_key, str) else args_train.protected_key[prot_key_idx]
+    
     run_parts.extend([
+        f"bottleneck_{args_train.bottleneck_dim}" if args_train.bottleneck else None,
         args_train.model_name.split('/')[-1],
         str(args_train.batch_size),
         str(args_train.learning_rate),
         "cp_init" if cp_path else None,
-        args_train.protected_key if isinstance(args_train.protected_key, str) else args_train.protected_key[prot_key_idx],
+        prot_attr if (adv or modular) else None,
         f"seed{seed}" if seed is not None else None,
         suffix,
     ])
