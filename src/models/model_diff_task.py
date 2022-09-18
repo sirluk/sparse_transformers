@@ -325,7 +325,7 @@ class TaskDiffModel(BasePruningModel):
             "bottleneck": self.has_bottleneck,
             "bottleneck_dim": self.bottleneck_dim,
             "bottleneck_dropout": self.bottleneck_dropout,
-            "model_state": self.model_state,
+            "fixmask": self.fixmask_state,
             "encoder_state_dict": self.encoder_module.state_dict(),
             "bottleneck_state_dict": self.bottleneck.state_dict(),
             "task_head_state_dict": self.task_head.state_dict(),
@@ -366,7 +366,7 @@ class TaskDiffModel(BasePruningModel):
         cls_instance._add_diff_parametrizations(
             n_parametrizations = 1,
             p_requires_grad = False,
-            fixmask_init = (info_dict["model_state"] == ModelState.FIXMASK),
+            fixmask_init = info_dict["fixmask"],
             alpha_init = 5, # standard value for alpha init, not important here as it will be overwritten by checkpoint
             concrete_lower = info_dict['concrete_lower'],
             concrete_upper = info_dict['concrete_upper'],
