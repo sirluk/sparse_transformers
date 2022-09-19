@@ -311,7 +311,11 @@ class AdvModel(BaseModel):
 
 
     @classmethod
-    def load_checkpoint(cls, filepath: Union[str, os.PathLike], map_location: Union[str, torch.device] = torch.device('cpu')) -> torch.nn.Module:
+    def load_checkpoint(
+        cls,
+        filepath: Union[str, os.PathLike],
+        map_location: Union[str, torch.device] = torch.device('cpu')
+    ) -> torch.nn.Module:
         info_dict = torch.load(filepath, map_location=map_location)
 
         cls_instance = cls(
