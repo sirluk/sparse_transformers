@@ -10,7 +10,7 @@ from transformers import get_linear_schedule_with_warmup
 from typing import Union, Callable, Dict, Optional
 
 from src.models.model_heads import ClfHead, AdvHead
-from src.models.model_base import BasePruningModel, ModelState
+from src.models.model_base import BasePruningModel
 from src.training_logger import TrainLogger
 from src.utils import dict_to_device
 
