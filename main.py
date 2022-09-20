@@ -431,6 +431,7 @@ def main():
 
     if not base_args.no_adv_attack:
         loss_fn, pred_fn, metrics = get_callables(num_labels_protected, class_weights = protected_class_weights)
+        loss_fn.to(trainer.device)
         adv_attack(
             trainer = trainer,
             train_loader = train_loader,

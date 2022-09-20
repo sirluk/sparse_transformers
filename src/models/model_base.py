@@ -97,10 +97,10 @@ class BaseModel(torch.nn.Module):
                 inputs = inputs.to(self.device)
             logits = forward_fn(inputs, **kwargs)
             if isinstance(logits, list):
-                eval_loss += torch.stack([loss_fn(x.cpu(), labels) for x in logits]).mean().item()
+                eval_loss += torch.stack([loss_fn(x, labels.to(self.device)) for x in logits]).mean().item()
                 preds, _ = torch.mode(torch.stack([pred_fn(x.cpu()) for x in logits]), dim=0)
             else:
-                eval_loss += loss_fn(logits.cpu(), labels).item()
+                eval_loss += loss_fn(logits, labels.to(self.device)).item()
                 preds = pred_fn(logits.cpu())
             output_list.append((
                 preds,
