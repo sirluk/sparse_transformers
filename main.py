@@ -90,6 +90,7 @@ def train_diff_pruning_adv(device, train_loader, val_loader, num_labels, num_lab
         model_state_dict = encoder_state_dict
     )
     trainer.to(device)
+    loss_fn_protected.to(trainer.device)
     trainer_cp = trainer.fit(
         train_loader = train_loader,
         val_loader = val_loader,
@@ -150,6 +151,7 @@ def train_diff_pruning_modular(device, train_loader, val_loader, num_labels, num
         model_state_dict = encoder_state_dict
     )
     trainer.to(device)
+    loss_fn_protected.to(trainer.device)
     trainer_cp = trainer.fit(
         train_loader = train_loader,
         val_loader = val_loader,
@@ -251,6 +253,7 @@ def train_baseline_adv(device, train_loader, val_loader, num_labels, num_labels_
         model_state_dict = encoder_state_dict
     )
     trainer.to(device)
+    loss_fn_protected.to(trainer.device)
     trainer_cp = trainer.fit(
         train_loader = train_loader,
         val_loader = val_loader,
@@ -301,6 +304,7 @@ def train_baseline_modular(device, train_loader, val_loader, num_labels, num_lab
         model_state_dict = encoder_state_dict
     )
     trainer.to(device)
+    loss_fn_protected.to(trainer.device)
     trainer_cp = trainer.fit(
         train_loader = train_loader,
         val_loader = val_loader,
