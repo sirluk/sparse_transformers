@@ -25,6 +25,7 @@ def get_param_from_name(model, param_name):
     return reduce(lambda a,b: getattr(a,b), [model] + param_name.split("."))
 
 
+@torch.no_grad()
 def merge_models(model_list: list) -> torch.nn.Module:
     # assert all weights match
     sets = [set([n for n, _ in m.named_parameters()]) for m in model_list]
@@ -37,16 +38,16 @@ def merge_models(model_list: list) -> torch.nn.Module:
         raise Exception(f"Keys {missing} not present in all models")
 
     model_frame = deepcopy(model_list[0])
-    with torch.no_grad():
-        for p_name, p in model_frame.named_parameters():
-            p.zero_()
-            for i in range(len(model_list)):
-                p_add = get_param_from_name(model_list[i], p_name)
-                p += p_add
+    for p_name, p in model_frame.named_parameters():
+        p.zero_()
+        for i in range(len(model_list)):
+            p_add = get_param_from_name(model_list[i], p_name)
+            p += p_add
 
     return model_frame
 
 
+@torch.no_grad()
 def merge_diff_models(
     diff_model_list: list,
     base_model: Optional[torch.nn.Module] = None,
@@ -63,8 +64,17 @@ def merge_diff_models(
             model = m.get_diff_weights(idx, as_module=True)
             model = BaseModel(model_name, model.state_dict())
             model_list.append(model)
+    # if no base_model is provided take the mean of the weights from the base weights of the diff models
     if base_model is None:
-        model_list.append(BaseModel(model_name))
+        base_model = BaseModel(model_name)
+        bms = [m.get_base_weights() for m in diff_model_list]
+        for values in zip(*bms):
+            _n, p_list = list(zip(*values))
+            _n = _n[0]
+            p = get_param_from_name(base_model.encoder, _n)
+            p_new = (torch.stack(p_list) / len(p_list)).sum(0)
+            p.copy_(p_new)
+        model_list.append(base_model)
     else: 
         sd = base_model.encoder.state_dict()
         model_list.append(BaseModel(model_name, sd))

@@ -37,6 +37,7 @@ data_config_hatespeech:
 model_config:
     model_name: "google/bert_uncased_L-4_H-256_A-4" # "bert-base-uncased" # "google/bert_uncased_L-4_H-256_A-4" # "google/bert_uncased_L-2_H-128_A-2"
     batch_size: 64
+    tokenizer_max_length: 200
 train_config:
     bottleneck: False
     structured_diff_pruning: True

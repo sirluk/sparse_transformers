@@ -4,30 +4,36 @@ import argparse
 import torch
 from torch.utils.data import TensorDataset, DataLoader, Dataset
 from tokenizers import Tokenizer
-from transformers import AutoTokenizer
+from transformers import AutoTokenizer, AutoConfig
 
-from typing import Union, Tuple
+from typing import Union, Tuple, List
 
 
 class TextDS(Dataset):
-    def __init__(self, text, tokenizer, max_len):
+    def __init__(self, text, tokenizer, max_length):
         self.text = text
-        self.max_len = max_len
+        self.max_length = max_length
         self.tokenizer = tokenizer
 
     def __len__(self) -> int:
         return len(self.text)
 
     def __getitem__(self, idx: int):
-        tokenized_sample = self.tokenizer(self.text[idx], padding='max_length', max_length=self.max_len, truncation=True, return_tensors="pt")
+        tokenized_sample = self.tokenizer(
+            self.text[idx],
+            padding="max_length",
+            truncation=True,
+            max_length=self.max_length,
+            return_tensors="pt"
+        )
         token_ids_sample = tokenized_sample['input_ids']
         token_type_ids_sample = tokenized_sample['token_type_ids']
         attention_masks_sample = tokenized_sample['attention_mask']
         return token_ids_sample, token_type_ids_sample, attention_masks_sample
 
 
-def multiprocess_tokenization(text_list, tokenizer, max_len, num_workers=16):
-    ds = TextDS(text_list, tokenizer, max_len)
+def multiprocess_tokenization(text_list, tokenizer, max_length, num_workers=16):
+    ds = TextDS(text_list, tokenizer, max_length)
     _loader = DataLoader(ds, batch_size=2048, shuffle=False, num_workers=num_workers, drop_last=False)
     token_ids = []
     token_type_ids = []
@@ -59,7 +65,7 @@ def get_data_loader(
     labels_task_path: Union[str, os.PathLike],
     labels_prot_path: Union[None, str, os.PathLike, list] = None,
     batch_size: int = 16,
-    max_length: int = 200,
+    max_length: int = 256,
     shuffle: bool = True,
     debug: bool = False
 ):
@@ -101,7 +107,7 @@ def get_data_loader(
 
     data = dict(zip(keys, zip(*x)))
 
-    input_ids, token_type_ids, attention_masks = multiprocess_tokenization(list(data[text_key]), tokenizer, max_length)
+    input_ids, token_type_ids, attention_masks = multiprocess_tokenization(data[text_key], tokenizer, max_length)
 
     labels_task = read_label_file(labels_task_path)
     labels_task = torch.tensor([labels_task[str(t)] for t in data[task_key]], dtype=torch.long)
@@ -133,6 +139,17 @@ def get_num_labels(label_file: Union[str, os.PathLike]) -> int:
     return 1 if num_labels==2 else num_labels
 
 
+def get_max_length(data_paths: List[Union[str, os.PathLike]], text_key: str):
+    
+    data_dicts = []
+    for p in data_paths:
+        with open(p, 'rb') as file:
+            data_dicts.extend(pickle.load(file))
+
+    texts = [d[text_key] for d in data_dicts]
+    return max([len(x) for x in texts])
+
+
 def get_data(
     args_train: argparse.Namespace,
     attr_idx: int = 0,
@@ -154,7 +171,17 @@ def get_data(
     if isinstance(args_train.protected_key, list) and not use_all_attr:
         setattr(args_train, "protected_key", args_train.protected_key[attr_idx])
 
+    cfg = AutoConfig.from_pretrained(args_train.model_name)
     tokenizer = AutoTokenizer.from_pretrained(args_train.model_name)
+
+    length_check = [
+        get_max_length([args_train.train_pkl, args_train.val_pkl], args_train.text_key),
+        cfg.max_position_embeddings
+    ]
+    if args_train.tokenizer_max_length is not None:
+        length_check.append(args_train.tokenizer_max_length)
+    max_length = min(length_check)
+
     train_loader = get_data_loader(
         task_key = args_train.task_key,
         protected_key = args_train.protected_key,
@@ -164,7 +191,7 @@ def get_data(
         labels_task_path = args_train.labels_task_path,
         labels_prot_path = args_train.labels_protected_path,
         batch_size = args_train.batch_size,
-        max_length = 200,
+        max_length = max_length,
         debug = debug
     )
     val_loader = get_data_loader(
@@ -176,7 +203,7 @@ def get_data(
         labels_task_path = args_train.labels_task_path,
         labels_prot_path = args_train.labels_protected_path,
         batch_size = args_train.batch_size,
-        max_length = 200,
+        max_length = max_length,
         shuffle = False,
         debug = debug
     )
