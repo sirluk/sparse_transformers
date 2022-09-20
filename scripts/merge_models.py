@@ -17,26 +17,49 @@ from src.data_handler import get_data
 from src.model_functions import generate_embeddings
 from src.utils import get_logger_custom, get_callables
 
-
-DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
+GPU_ID = 0
+DEVICE = f"cuda:{GPU_ID}" if torch.cuda.is_available() else "cpu"
 DS = "pan16"
-CP = {
-    "task": "/share/home/lukash/pan16/bertl4/res_gender/cp/bert_uncased_L-4_H-256_A-4-task_baseline-seed0.pt",
-    "gender": "../checkpoints_custom/adverserial-diff_pruning_0.1-bert_uncased_L-4_H-256_A-4-64-2e-05-cp_init-gender-seed0.pt",
-    "age": "../checkpoints_custom/adverserial-diff_pruning_0.1-bert_uncased_L-4_H-256_A-4-64-2e-05-cp_init-age-seed0.pt"
-}
 LOG_DIR = "logs_custom"
-LOGGER_NAME = "merged_mask_model"
+LOGGER_NAME = "merged_mask_model_seed0"
 MODEL_ADV_CLS = AdvDiffModel
 MODEL_TASK_CLS = TaskModel
-
+# CP = {
+#     "task": "/share/home/lukash/pan16/bertl4/res_gender/cp/bert_uncased_L-4_H-256_A-4-task_baseline-seed0.pt",
+#     "gender": "/share/rk8/home/lukash/sparse_transformers/checkpoints_custom/adverserial-diff_pruning_0.1-bert_uncased_L-4_H-256_A-4-64-2e-05-cp_init-gender-seed0.pt",
+#     "age": "/share/rk8/home/lukash/sparse_transformers/checkpoints_custom/adverserial-diff_pruning_0.1-bert_uncased_L-4_H-256_A-4-64-2e-05-cp_init-age-seed0.pt"
+# }
+CP = {
+    "gender": "/share/home/lukash/pan16/bertl4/res_gender/cp/bert_uncased_L-4_H-256_A-4-adv_fixmask0.1-seed0.pt",
+    "age": "/share/home/lukash/pan16/bertl4/res_age/cp/adverserial-diff_pruning_0.1-bert_uncased_L-4_H-256_A-4-64-2e-05-age-seed0.pt"
+}
 
 def main():
     
     model_gender = MODEL_ADV_CLS.load_checkpoint(CP["gender"])
     model_age = MODEL_ADV_CLS.load_checkpoint(CP["age"])
-    model_task = MODEL_TASK_CLS.load_checkpoint(CP["task"])
-    model = merge_diff_models([model_gender, model_age], base_model=model_task)
+    if "task" in CP:
+        model_task = MODEL_TASK_CLS.load_checkpoint(CP["task"])
+        model = merge_diff_models([model_gender, model_age], base_model=model_task)
+    else:
+        model = merge_diff_models([model_gender, model_age])
+
+    # # TEMP - for debugging
+    # import IPython; IPython.embed(); exit(1)
+    # from src.model_functions import get_param_from_name
+    # samples = [(i, n1) for (i, ((n1, p1), (n2, p2))) in enumerate(zip(model_gender.named_parameters(), model_age.named_parameters())) if p1.flatten()[0].item()!=p2.flatten()[0].item() and n1[-8:]=="original"]
+    # n = [n for n,p in model.named_parameters()][samples[0][0]]
+    # _np = n.split(".")
+    # np = ".".join(_np[:-1] + ["parametrizations", _np[-1], "original"])
+    # np_diff = ".".join(_np[:-1] + ["parametrizations", _np[-1], "0", "diff_weight"])
+    # p = get_param_from_name(model, n)
+    # pg = get_param_from_name(model_gender, np)
+    # pa = get_param_from_name(model_age, np)
+    # pg_diff = get_param_from_name(model_gender, np_diff)
+    # pa_diff = get_param_from_name(model_age, np_diff)
+    # test = [x.flatten()[0].item() for x in [p, pg, pa, pg_diff, pa_diff]]
+    # import IPython; IPython.embed(); exit(1)
+    
     model.to(DEVICE)
     model.eval()
 
