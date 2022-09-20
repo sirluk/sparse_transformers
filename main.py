@@ -70,10 +70,10 @@ def train_diff_pruning_task(device, train_loader, val_loader, num_labels, train_
     return trainer
 
 
-def train_diff_pruning_adv(device, train_loader, val_loader, num_labels, num_labels_protected, train_logger, args_train, encoder_state_dict = None, seed = None):
+def train_diff_pruning_adv(device, train_loader, val_loader, num_labels, num_labels_protected, protected_class_weights, train_logger, args_train, encoder_state_dict = None, seed = None):
 
     loss_fn, pred_fn, metrics = get_callables(num_labels)
-    loss_fn_protected, pred_fn_protected, metrics_protected = get_callables(num_labels_protected)
+    loss_fn_protected, pred_fn_protected, metrics_protected = get_callables(num_labels_protected, class_weights = protected_class_weights)
 
     trainer = AdvDiffModel(
         model_name = args_train.model_name,
@@ -129,10 +129,10 @@ def train_diff_pruning_adv(device, train_loader, val_loader, num_labels, num_lab
     return trainer
 
 
-def train_diff_pruning_modular(device, train_loader, val_loader, num_labels, num_labels_protected, train_logger, args_train, encoder_state_dict = None, seed = None):
+def train_diff_pruning_modular(device, train_loader, val_loader, num_labels, num_labels_protected, protected_class_weights, train_logger, args_train, encoder_state_dict = None, seed = None):
 
     loss_fn, pred_fn, metrics = get_callables(num_labels)
-    loss_fn_protected, pred_fn_protected, metrics_protected = get_callables(num_labels_protected)
+    loss_fn_protected, pred_fn_protected, metrics_protected = get_callables(num_labels_protected, class_weights = protected_class_weights)
 
     trainer = ModularDiffModel(
         model_name = args_train.model_name,
@@ -231,10 +231,10 @@ def train_baseline_task(device, train_loader, val_loader, num_labels, train_logg
     return trainer
 
 
-def train_baseline_adv(device, train_loader, val_loader, num_labels, num_labels_protected, train_logger, args_train, encoder_state_dict = None, seed = None):
+def train_baseline_adv(device, train_loader, val_loader, num_labels, num_labels_protected, protected_class_weights, train_logger, args_train, encoder_state_dict = None, seed = None):
 
     loss_fn, pred_fn, metrics = get_callables(num_labels)
-    loss_fn_protected, pred_fn_protected, metrics_protected = get_callables(num_labels_protected)
+    loss_fn_protected, pred_fn_protected, metrics_protected = get_callables(num_labels_protected, class_weights = protected_class_weights)
 
     trainer = AdvModel(
         model_name = args_train.model_name,
@@ -280,10 +280,10 @@ def train_baseline_adv(device, train_loader, val_loader, num_labels, num_labels_
     return trainer
 
 
-def train_baseline_modular(device, train_loader, val_loader, num_labels, num_labels_protected, train_logger, args_train, encoder_state_dict = None, seed = None):
+def train_baseline_modular(device, train_loader, val_loader, num_labels, num_labels_protected, protected_class_weights, train_logger, args_train, encoder_state_dict = None, seed = None):
 
     loss_fn, pred_fn, metrics = get_callables(num_labels)
-    loss_fn_protected, pred_fn_protected, metrics_protected = get_callables(num_labels_protected)
+    loss_fn_protected, pred_fn_protected, metrics_protected = get_callables(num_labels_protected, class_weights = protected_class_weights)
 
     trainer = ModularModel(
         model_name = args_train.model_name,
@@ -375,9 +375,15 @@ def main():
         cp_modular_biased = base_args.cp_modular_biased
     )
 
-    train_loader, val_loader, num_labels, num_labels_protected = get_data(
-        args_train, attr_idx = base_args.prot_key_idx, debug = base_args.debug
-    )
+    if args_train.weighted_loss_protected and (base_args.modular or base_args.adv):
+        train_loader, val_loader, num_labels, num_labels_protected, protected_class_weights = get_data(
+            args_train, attr_idx = base_args.prot_key_idx, return_prot_class_weights = True, debug = base_args.debug
+        )
+    else:
+        train_loader, val_loader, num_labels, num_labels_protected = get_data(
+            args_train, attr_idx = base_args.prot_key_idx, return_prot_class_weights = False, debug = base_args.debug
+        )
+        protected_class_weights = None     
     
     train_logger = get_logger(
         baseline = base_args.baseline,
@@ -395,11 +401,11 @@ def main():
     if base_args.baseline:
         if base_args.modular:
             trainer = train_baseline_modular(
-                device, train_loader, val_loader, num_labels, num_labels_protected, train_logger, args_train, encoder_state_dict, base_args.seed
+                device, train_loader, val_loader, num_labels, num_labels_protected, protected_class_weights, train_logger, args_train, encoder_state_dict, base_args.seed
             )
         elif base_args.adv:
             trainer = train_baseline_adv(
-                device, train_loader, val_loader, num_labels, num_labels_protected, train_logger, args_train, encoder_state_dict, base_args.seed
+                device, train_loader, val_loader, num_labels, num_labels_protected, protected_class_weights, train_logger, args_train, encoder_state_dict, base_args.seed
             )
         else:
             trainer = train_baseline_task(
@@ -408,11 +414,11 @@ def main():
     else:
         if base_args.modular:
             trainer = train_diff_pruning_modular(
-                device, train_loader, val_loader, num_labels, num_labels_protected, train_logger, args_train, encoder_state_dict, base_args.seed
+                device, train_loader, val_loader, num_labels, num_labels_protected, protected_class_weights, train_logger, args_train, encoder_state_dict, base_args.seed
             )
         elif base_args.adv:
             trainer = train_diff_pruning_adv(
-                device, train_loader, val_loader, num_labels, num_labels_protected, train_logger, args_train, encoder_state_dict, base_args.seed
+                device, train_loader, val_loader, num_labels, num_labels_protected, protected_class_weights, train_logger, args_train, encoder_state_dict, base_args.seed
             )
         else:
             trainer = train_diff_pruning_task(
@@ -420,7 +426,7 @@ def main():
             )
 
     if not base_args.no_adv_attack:
-        loss_fn, pred_fn, metrics = get_callables(num_labels_protected)
+        loss_fn, pred_fn, metrics = get_callables(num_labels_protected, class_weights = protected_class_weights)
         adv_attack(
             trainer = trainer,
             train_loader = train_loader,

@@ -39,6 +39,7 @@ model_config:
     batch_size: 64
     tokenizer_max_length: 200
 train_config:
+    weighted_loss_protected: True
     bottleneck: False
     structured_diff_pruning: True
     alpha_init: 5

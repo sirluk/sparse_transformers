@@ -1,12 +1,13 @@
 import os
 import pickle
 import argparse
+from sklearn.utils.class_weight import compute_class_weight
 import torch
 from torch.utils.data import TensorDataset, DataLoader, Dataset
 from tokenizers import Tokenizer
 from transformers import AutoTokenizer, AutoConfig
 
-from typing import Union, Tuple, List
+from typing import Union, Tuple, List, Optional
 
 
 class TextDS(Dataset):
@@ -63,7 +64,7 @@ def get_data_loader(
     tokenizer: Tokenizer,
     data_path: Union[str, os.PathLike],
     labels_task_path: Union[str, os.PathLike],
-    labels_prot_path: Union[None, str, os.PathLike, list] = None,
+    labels_prot_path: Optional[Union[str, os.PathLike, list]] = None,
     batch_size: int = 16,
     max_length: int = 256,
     shuffle: bool = True,
@@ -139,7 +140,7 @@ def get_num_labels(label_file: Union[str, os.PathLike]) -> int:
     return 1 if num_labels==2 else num_labels
 
 
-def get_max_length(data_paths: List[Union[str, os.PathLike]], text_key: str):
+def get_max_length(data_paths: List[Union[str, os.PathLike]], text_key: str) -> int:
     
     data_dicts = []
     for p in data_paths:
@@ -150,12 +151,37 @@ def get_max_length(data_paths: List[Union[str, os.PathLike]], text_key: str):
     return max([len(x) for x in texts])
 
 
+def get_class_weights(
+    data_path: Union[str, os.PathLike],
+    label_file_path: Union[str, os.PathLike, list],
+    label_key: Union[str, list]
+) -> list:
+    if isinstance(label_file_path, str) or isinstance(label_file_path, os.PathLike):
+        assert isinstance(label_key, str), "if only one label_file_path is provided label_key needs to by string"
+        label_file_path = [label_file_path]
+        label_key = [label_key]
+    else:
+        assert isinstance(label_key, list), "label_key needs to have same length as label_file_path"
+
+    with open(data_path, 'rb') as f:
+        data_dicts = pickle.load(f)
+
+    res = []
+    for p, k in zip(label_file_path, label_key):
+        label_mapping = read_label_file(p)
+        labels = [label_mapping[d[k]] for d in data_dicts]
+        class_weights = compute_class_weight(class_weight='balanced', classes=list(set(labels)), y=labels)
+        res.append(class_weights.tolist())
+    return res
+    
+
 def get_data(
     args_train: argparse.Namespace,
     attr_idx: int = 0,
     use_all_attr: bool = False,
+    return_prot_class_weights: bool = False,
     debug: bool = False
-) -> Tuple[DataLoader, DataLoader, int, int]:
+) -> Tuple[DataLoader, DataLoader, int, int, list]:
     
     num_labels = get_num_labels(args_train.labels_task_path)
 
@@ -182,6 +208,11 @@ def get_data(
         length_check.append(args_train.tokenizer_max_length)
     max_length = min(length_check)
 
+    if return_prot_class_weights:
+        num_classes_protected = get_class_weights(args_train.train_pkl, args_train.labels_protected_path, args_train.protected_key)
+    else:
+        num_classes_protected = []   
+
     train_loader = get_data_loader(
         task_key = args_train.task_key,
         protected_key = args_train.protected_key,
@@ -207,4 +238,4 @@ def get_data(
         shuffle = False,
         debug = debug
     )
-    return train_loader, val_loader, num_labels, *num_labels_protected
+    return train_loader, val_loader, num_labels, *num_labels_protected, *num_classes_protected

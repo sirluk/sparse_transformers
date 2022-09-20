@@ -97,6 +97,7 @@ def get_name_for_run(
         str(args_train.batch_size),
         str(args_train.learning_rate),
         "cp_init" if cp_path else None,
+        "weighted_loss_prot" if args_train.weighted_loss_protected and (adv or modular) else None,
         prot_attr if (adv or modular) else None,
         f"seed{seed}" if seed is not None else None,
         suffix,
@@ -142,12 +143,20 @@ def get_logger_custom(
     )
 
 
-def get_callables(num_labels: int) -> Tuple[Callable, Callable, Dict[str, Callable]]:
+def get_callables(num_labels: int, class_weights: Optional[Union[int, float, list]] = None) -> Tuple[Callable, Callable, Dict[str, Callable]]:
     if num_labels == 1:
-        loss_fn = lambda x, y: torch.nn.BCEWithLogitsLoss()(x.flatten(), y.float())
+        if class_weights is not None:
+            if isinstance(class_weights, list):
+                assert 0 < len(class_weights) < 3, "if num_labels = 1 and class_weights is list length needs to be either 1 or 2"
+                class_weights = class_weights[1] if len(class_weights)==2 else class_weights[0]
+            class_weights = torch.tensor(class_weights)
+        loss_fn = lambda x, y: torch.nn.BCEWithLogitsLoss(pos_weight=class_weights)(x.flatten(), y.float())
         pred_fn = lambda x: (x > 0).long()
     else:
-        loss_fn = torch.nn.CrossEntropyLoss()
+        if class_weights is not None:
+            assert isinstance(class_weights, list) and len(class_weights)==num_labels, "len(class_weights) != num_labels"
+            class_weights = torch.tensor(class_weights)
+        loss_fn = torch.nn.CrossEntropyLoss(weight=class_weights)
         pred_fn = lambda x: torch.argmax(x, dim=1)
     metrics = {
         "acc": accuracy,
