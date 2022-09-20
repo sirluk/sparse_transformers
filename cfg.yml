@@ -10,17 +10,17 @@ data_config_bios:
     output_dir: "checkpoints_bios"
     log_dir: "logs_bios"
 data_config_pan16:
-    task_key: "mention"
+    task_key: "task_label"
     protected_key: ["gender", "age"]
     text_key: "text"
-    train_pkl: "/share/cp/datasets/nlp/text_classification_bias/pan16_prep/train_balanced_gender.pkl"
-    val_pkl: "/share/cp/datasets/nlp/text_classification_bias/pan16_prep/test.pkl"
-    test_pkl: "/share/cp/datasets/nlp/text_classification_bias/pan16_prep/test.pkl"
+    train_pkl: "/share/cp/datasets/nlp/text_classification_bias/Mention_PAN16/pickle_format/train.pkl"
+    val_pkl: "/share/cp/datasets/nlp/text_classification_bias/Mention_PAN16/pickle_format/validation.pkl"
+    test_pkl: "/share/cp/datasets/nlp/text_classification_bias/Mention_PAN16/pickle_format/test.pkl"
     labels_protected_path: [
-        "/share/cp/datasets/nlp/text_classification_bias/pan16_prep/labels_protected_gender.txt",
-        "/share/cp/datasets/nlp/text_classification_bias/pan16_prep/labels_protected_age.txt"
+        "/share/cp/datasets/nlp/text_classification_bias/Mention_PAN16/pickle_format/labels_protected_gender.txt",
+        "/share/cp/datasets/nlp/text_classification_bias/Mention_PAN16/pickle_format/labels_protected_age.txt"
     ]
-    labels_task_path: "/share/cp/datasets/nlp/text_classification_bias/pan16_prep/labels_task.txt"
+    labels_task_path: "/share/cp/datasets/nlp/text_classification_bias/Mention_PAN16/pickle_format/labels_task.txt"
     output_dir: "checkpoints_pan16"
     log_dir: "logs_pan16"
 data_config_hatespeech:
