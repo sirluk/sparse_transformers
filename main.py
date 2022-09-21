@@ -90,7 +90,6 @@ def train_diff_pruning_adv(device, train_loader, val_loader, num_labels, num_lab
         model_state_dict = encoder_state_dict
     )
     trainer.to(device)
-    loss_fn_protected.to(trainer.device)
     trainer_cp = trainer.fit(
         train_loader = train_loader,
         val_loader = val_loader,
@@ -151,7 +150,6 @@ def train_diff_pruning_modular(device, train_loader, val_loader, num_labels, num
         model_state_dict = encoder_state_dict
     )
     trainer.to(device)
-    loss_fn_protected.to(trainer.device)
     trainer_cp = trainer.fit(
         train_loader = train_loader,
         val_loader = val_loader,
@@ -253,7 +251,6 @@ def train_baseline_adv(device, train_loader, val_loader, num_labels, num_labels_
         model_state_dict = encoder_state_dict
     )
     trainer.to(device)
-    loss_fn_protected.to(trainer.device)
     trainer_cp = trainer.fit(
         train_loader = train_loader,
         val_loader = val_loader,
@@ -304,7 +301,6 @@ def train_baseline_modular(device, train_loader, val_loader, num_labels, num_lab
         model_state_dict = encoder_state_dict
     )
     trainer.to(device)
-    loss_fn_protected.to(trainer.device)
     trainer_cp = trainer.fit(
         train_loader = train_loader,
         val_loader = val_loader,
@@ -383,6 +379,7 @@ def main():
         train_loader, val_loader, num_labels, num_labels_protected, protected_class_weights = get_data(
             args_train, attr_idx = base_args.prot_key_idx, return_prot_class_weights = True, debug = base_args.debug
         )
+        protected_class_weights = torch.tensor(protected_class_weights, device=device[0])
     else:
         train_loader, val_loader, num_labels, num_labels_protected = get_data(
             args_train, attr_idx = base_args.prot_key_idx, return_prot_class_weights = False, debug = base_args.debug
@@ -431,7 +428,6 @@ def main():
 
     if not base_args.no_adv_attack:
         loss_fn, pred_fn, metrics = get_callables(num_labels_protected, class_weights = protected_class_weights)
-        loss_fn.to(trainer.device)
         adv_attack(
             trainer = trainer,
             train_loader = train_loader,
