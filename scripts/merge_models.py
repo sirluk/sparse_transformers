@@ -35,7 +35,7 @@ CP = {
 }
 
 def main():
-    
+
     model_gender = MODEL_ADV_CLS.load_checkpoint(CP["gender"])
     model_age = MODEL_ADV_CLS.load_checkpoint(CP["age"])
     if "task" in CP:
@@ -59,7 +59,7 @@ def main():
     # pa_diff = get_param_from_name(model_age, np_diff)
     # test = [x.flatten()[0].item() for x in [p, pg, pa, pg_diff, pa_diff]]
     # import IPython; IPython.embed(); exit(1)
-    
+
     model.to(DEVICE)
     model.eval()
 

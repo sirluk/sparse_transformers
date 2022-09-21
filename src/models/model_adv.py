@@ -65,7 +65,7 @@ class AdvModel(BaseModel):
         return self.task_head(self._forward(**x))
 
     def forward_protected(self, **x) -> torch.Tensor:
-        return self.adv_head(self._forward(**x)) 
+        return self.adv_head(self._forward(**x))
 
     def fit(
         self,
@@ -112,7 +112,7 @@ class AdvModel(BaseModel):
 
         train_iterator = trange(num_epochs_total, desc=train_str.format(0, "", ""), leave=False, position=0)
         for epoch in train_iterator:
-            
+
             if epoch<num_epochs_warmup:
                 _adv_lambda = 0.
             else:
@@ -134,7 +134,7 @@ class AdvModel(BaseModel):
                 metrics
             )
             logger.validation_loss(epoch, result, suffix="task_debiased")
-            
+
             result_protected = self.evaluate(
                 val_loader,
                 loss_fn_protected,

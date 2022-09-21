@@ -49,7 +49,7 @@ class ModularDiffModel_2attr(ModularDiffModel):
             bottleneck_dropout,
             **kwargs
         )
-        
+
         self.num_labels_protected2 = num_labels_protected2
         self.attr_bias_head = AdvHead(adv_count, hid_sizes=[self.in_size_heads]*(adv_n_hidden+1), num_labels=num_labels_protected2, dropout=adv_dropout)
 
@@ -139,7 +139,7 @@ class ModularDiffModel_2attr(ModularDiffModel):
 
         train_iterator = trange(num_epochs_total, desc=train_str.format(0, self.model_state, ""), leave=False, position=0)
         for epoch in train_iterator:
-            
+
             if epoch<num_epochs_warmup:
                 _adv_lambda = 0.
             else:
@@ -334,7 +334,7 @@ class ModularDiffModel_2attr(ModularDiffModel):
 
             self.optimizer.step()
             self.zero_grad()
-            
+
             # END STEP TASK
             ##################################################
 
@@ -376,7 +376,7 @@ class ModularDiffModel_2attr(ModularDiffModel):
 
             self.optimizer.step()
             self.zero_grad()
-            
+
             # END STEP DEBIAS
             ##################################################
 
@@ -428,7 +428,7 @@ class ModularDiffModel_2attr(ModularDiffModel):
             {
                 "params": self.attr_bias_head.parameters(),
                 "lr": learning_rate_adv_head
-            },            
+            },
         ]
 
         optimizer_param_groups.extend(
@@ -441,7 +441,7 @@ class ModularDiffModel_2attr(ModularDiffModel):
                     "params": [p for n,p in self.encoder.named_parameters() if n[-9:] == f".original"],
                     "lr": learning_rate,
                     "weight_decay": weight_decay
-                }                
+                }
             )
 
         self.optimizer = AdamW(optimizer_param_groups, betas=(0.9, 0.999), eps=1e-08)

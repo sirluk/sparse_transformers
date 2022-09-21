@@ -122,7 +122,7 @@ class BaseModel(torch.nn.Module):
         losses = []
         for output in outputs:
             losses.append(loss_fn(output, labels))
-        return torch.stack(losses).mean()        
+        return torch.stack(losses).mean()
 
     def to(self, device: Union[list, Union[str, torch.device]], *args, **kwargs) -> None:
         self._remove_parallel()
@@ -286,7 +286,7 @@ class BasePruningModel(BaseModel):
                     for par in par_list:
                         p = par.mask if isinstance(par, DiffWeightFixmask) else par.z
                         p_counts += count_fn(p, p.dtype==torch.bool)
-                               
+
         return p_counts.tolist()
 
 
@@ -298,12 +298,12 @@ class BasePruningModel(BaseModel):
                     parametrize.remove_parametrizations(module, n)
             except AttributeError:
                 pass
-        self.model_state = ModelState.INIT    
+        self.model_state = ModelState.INIT
 
 
     def _add_diff_parametrizations(self, n_parametrizations: int = 1, p_requires_grad: bool = False, fixmask_init: bool = False, **kwargs) -> None:
         assert not self.parametrized, "cannot add diff parametrizations because of existing parametrizations in the model"
-        for base_module in self.get_encoder_base_modules(): 
+        for base_module in self.get_encoder_base_modules():
             for n,p in list(base_module.named_parameters()):
                 p.requires_grad = p_requires_grad
                 for _ in range(n_parametrizations): # number of diff networks to add
@@ -385,7 +385,7 @@ class BasePruningModel(BaseModel):
                     else:
                         remaining = torch.cat([x[x<c] for x,c in zip(diff_weights_abs, min_cutoffs)])
                         remaining_cutoff = _get_cutoff(remaining, pct - merged_min_pct)
-                        cutoffs = [min(remaining_cutoff, c) for c in min_cutoffs]          
+                        cutoffs = [min(remaining_cutoff, c) for c in min_cutoffs]
                 else:
                     cutoffs = [_get_cutoff(x, pct, abs=False) for x in diff_weights_abs]
 
@@ -474,7 +474,7 @@ class BasePruningModel(BaseModel):
             for p_name, p in named_parameter_list:
                 _p = reduce(lambda a,b: getattr(a,b), [new_model] + p_name.split("."))
                 _p.copy_(p)
-        return new_model        
+        return new_model
 
 
     def get_diff_weights(self, idx: int, as_module: bool = False):
@@ -496,7 +496,7 @@ class BasePruningModel(BaseModel):
         else:
             return res
 
-        
+
     def get_base_weights(self, as_module: bool = False):
         if self.parametrized:
             res = [(n[:-9].replace(".parametrizations", ""), p) for n,p in self.encoder.named_parameters() if n[-9:]==".original"]

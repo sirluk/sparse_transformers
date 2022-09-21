@@ -88,7 +88,7 @@ def map_gradient_based(train_ds, val_ds, loss_fn, train_logger):
             outputs = llayer(X)
             loss = loss_fn(outputs, Y)
             loss = loss.mean()
-            
+
             loss.backward()
             optimizer.step()
             llayer.zero_grad()
@@ -109,7 +109,7 @@ def map_gradient_based(train_ds, val_ds, loss_fn, train_logger):
                 outputs = llayer(X)
                 loss_val.append(loss_fn(outputs, Y))
             loss_val = torch.cat(loss_val).mean()
-        
+
         train_logger.validation_loss(
             eval_step = epoch,
             result = {"loss": loss_val.item()},

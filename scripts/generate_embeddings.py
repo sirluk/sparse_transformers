@@ -70,7 +70,7 @@ def get_models(base_args):
             model_name_biased = f'bert_uncased_L-4_H-256_A-4-task_fixmask{base_args.fixmask_pct}-seed{base_args.seed}.pt'
             model_name_debiased = f'bert_uncased_L-4_H-256_A-4-adv_fixmask{base_args.fixmask_pct}-seed{base_args.seed}.pt'
             model_biased = TaskDiffModel.load_checkpoint(os.path.join(model_path, model_name_biased), remove_parametrizations=True)
-            model_debiased = AdvDiffModel.load_checkpoint(os.path.join(model_path, model_name_debiased), remove_parametrizations=True)                    
+            model_debiased = AdvDiffModel.load_checkpoint(os.path.join(model_path, model_name_debiased), remove_parametrizations=True)
     return model_biased, model_debiased
 
 
@@ -103,7 +103,7 @@ def get_embeddings(base_args, args_train):
         os.makedirs(emb_dir, exist_ok=True)
         torch.save(train_embeddings_ds, os.path.join(emb_dir, f"train_embeddings_ds_{emb_type}.pth"))
         torch.save(val_embeddings_ds, os.path.join(emb_dir, f"val_embeddings_ds_{emb_type}.pth"))
-    
+
     return train_embeddings_ds, val_embeddings_ds
 
 
@@ -152,7 +152,7 @@ if __name__ == "__main__":
     parser.add_argument("--modular", action="store_true", help="Whether to run modular training (task only and adverserial)")
     parser.add_argument("--seed", type=int, default=0, help="torch random seed")
     parser.add_argument("--ds", type=str, default="bios", help="dataset")
-    
+
     args = parser.parse_args()
 
     if args.run_all:

@@ -384,8 +384,8 @@ def main():
         train_loader, val_loader, num_labels, num_labels_protected = get_data(
             args_train, attr_idx = base_args.prot_key_idx, return_prot_class_weights = False, debug = base_args.debug
         )
-        protected_class_weights = None     
-    
+        protected_class_weights = None
+
     train_logger = get_logger(
         baseline = base_args.baseline,
         adv = base_args.adv,

@@ -127,7 +127,7 @@ class TaskModel(BaseModel):
 
         print("Final result after " + train_str.format(epoch, str_suffix(result)))
         print("Best result: " + train_str.format(cpt_epoch, str_suffix(cpt_result)))
-        
+
         return cpt
 
 
@@ -240,7 +240,7 @@ class TaskModel(BaseModel):
 
         output_dir = Path(output_dir)
         output_dir.mkdir(parents=True, exist_ok=True)
-        
+
         if checkpoint_name is None:
             checkpoint_name = self.make_checkpoint_name(seed)
         filepath = output_dir / checkpoint_name

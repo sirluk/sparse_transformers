@@ -126,7 +126,7 @@ def main():
             outputs = llayer(X)
             loss = loss_fn(outputs, Y)
             loss = loss.mean()
-            
+
             loss.backward()
             optimizer.step()
             llayer.zero_grad()

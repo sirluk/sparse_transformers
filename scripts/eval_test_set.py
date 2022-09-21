@@ -31,7 +31,7 @@ def get_model_cls(cp_name: str):
         elif "modular" in cp_name:
             return ModularDiffModel
         else:
-            return TaskDiffModel        
+            return TaskDiffModel
 
 
 GPU_ID = 0
@@ -94,7 +94,7 @@ def main():
                     metrics
                 )
                 train_logger.validation_loss(0, result, suffix="task_debiased")
-                
+
                 result_protected = model.evaluate(
                     test_loader,
                     loss_fn_protected,

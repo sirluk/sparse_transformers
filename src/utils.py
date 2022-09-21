@@ -66,7 +66,7 @@ def get_name_for_run(
     suffix: Optional[str] = None
 ):
     run_parts = ["DEBUG" if debug else None]
-    
+
     if modular:
         run_parts.extend([
             "modular",
@@ -90,7 +90,7 @@ def get_name_for_run(
             ])
 
     prot_attr = args_train.protected_key if isinstance(args_train.protected_key, str) else args_train.protected_key[prot_key_idx]
-    
+
     run_parts.extend([
         f"bottleneck_{args_train.bottleneck_dim}" if args_train.bottleneck else None,
         args_train.model_name.split('/')[-1],

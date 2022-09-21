@@ -48,7 +48,7 @@ class AdvDiffModel_2attr(AdvDiffModel):
             bottleneck_dropout,
             **kwargs
         )
-        
+
         self.num_labels_protected2 = num_labels_protected2
         self.attr_bias_head = AdvHead(adv_count, hid_sizes=[self.in_size_heads]*(adv_n_hidden+1), num_labels=num_labels_protected2, dropout=adv_dropout)
 
@@ -133,7 +133,7 @@ class AdvDiffModel_2attr(AdvDiffModel):
 
         train_iterator = trange(num_epochs_total, desc=train_str.format(0, self.model_state, ""), leave=False, position=0)
         for epoch in train_iterator:
-            
+
             if epoch<num_epochs_warmup:
                 _adv_lambda = 0.
             else:
@@ -303,7 +303,7 @@ class AdvDiffModel_2attr(AdvDiffModel):
 
             self.optimizer.step()
             self.zero_grad()
-            
+
             # self.scheduler.step()
             losses_dict = {
                 "total_adv": loss.item(),
@@ -316,7 +316,7 @@ class AdvDiffModel_2attr(AdvDiffModel):
 
             epoch_iterator.set_description(epoch_str.format(step, loss.item(), partial_losses[2]), refresh=True)
 
-            self.global_step += 1     
+            self.global_step += 1
 
 
     def _init_optimizer_and_schedule(
@@ -347,7 +347,7 @@ class AdvDiffModel_2attr(AdvDiffModel):
             {
                 "params": self.attr_bias_head.parameters(),
                 "lr": learning_rate_adv_head
-            },            
+            },
         ]
 
         optimizer_param_groups.extend(

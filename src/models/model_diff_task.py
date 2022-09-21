@@ -212,7 +212,7 @@ class TaskDiffModel(BasePruningModel):
         max_grad_norm: float,
         concrete_samples: int
     ) -> None:
-    
+
         self.train()
 
         epoch_str = "training - step {}, loss: {:7.5f}, loss l0 pen: {:7.5f}"
@@ -223,7 +223,7 @@ class TaskDiffModel(BasePruningModel):
             inputs = dict_to_device(inputs, self.device)
 
             concrete_samples = concrete_samples if self.finetune_state else 1
-            
+
             loss = 0.
             partial_losses = torch.zeros((2,))
             for _ in range(concrete_samples):

@@ -59,7 +59,7 @@ class ModularModel(BaseModel):
         # heads
         self.task_head = SwitchHead(adv_task_head, ClfHead, [self.in_size_heads]*(task_n_hidden+1), num_labels_task, dropout=task_dropout)
         self.adv_head = AdvHead(adv_count, hid_sizes=[self.in_size_heads]*(adv_n_hidden+1), num_labels=num_labels_protected, dropout=adv_dropout)
-        
+
         # separate encoders
         self.encoder_biased = self.encoder
         self.encoder_debiased = copy.deepcopy(self.encoder_biased)
@@ -74,7 +74,7 @@ class ModularModel(BaseModel):
         return self.task_head(self._forward(**x))
 
     def forward_protected(self, **x) -> torch.Tensor:
-        return self.adv_head(self._forward(**x)) 
+        return self.adv_head(self._forward(**x))
 
     def fit(
         self,
@@ -243,7 +243,7 @@ class ModularModel(BaseModel):
 
             self.optimizer.step()
             self.zero_grad()
-            
+
             # END STEP TASK
             ##################################################
 
@@ -268,7 +268,7 @@ class ModularModel(BaseModel):
 
             self.optimizer.step()
             self.zero_grad()
-            
+
             # END STEP DEBIAS
             ##################################################
 
@@ -334,11 +334,11 @@ class ModularModel(BaseModel):
             },
             {
                 "params": self.encoder_biased.parameters(),
-                "lr": learning_rate                
+                "lr": learning_rate
             },
             {
                 "params": self.encoder_debiased.parameters(),
-                "lr": learning_rate                
+                "lr": learning_rate
             }
         ]
 
@@ -387,7 +387,7 @@ class ModularModel(BaseModel):
             "encoder_biased_state_dict": self.encoder_biased.state_dict(),
             "encoder_debiased_state_dict": self.encoder_debiased.state_dict()
         }
-        
+
         output_dir = Path(output_dir)
         output_dir.mkdir(parents=True, exist_ok=True)
 
@@ -424,7 +424,7 @@ class ModularModel(BaseModel):
 
         cls_instance.encoder_biased = cls_instance.encoder
         cls_instance.encoder_debiased = copy.deepcopy(cls_instance.encoder_biased)
-        
+
         cls_instance.encoder_biased.load_state_dict(info_dict['encoder_biased_state_dict'])
         cls_instance.encoder_debiased.load_state_dict(info_dict['encoder_debiased_state_dict'])
         cls_instance.bottleneck.load_state_dict(info_dict['bottleneck_state_dict'])

@@ -141,7 +141,7 @@ def get_num_labels(label_file: Union[str, os.PathLike]) -> int:
 
 
 def get_max_length(data_paths: List[Union[str, os.PathLike]], text_key: str) -> int:
-    
+
     data_dicts = []
     for p in data_paths:
         with open(p, 'rb') as file:
@@ -173,7 +173,7 @@ def get_class_weights(
         class_weights = compute_class_weight(class_weight='balanced', classes=list(set(labels)), y=labels)
         res.append(class_weights.tolist())
     return res
-    
+
 
 def get_data(
     args_train: argparse.Namespace,
@@ -182,7 +182,7 @@ def get_data(
     return_prot_class_weights: bool = False,
     debug: bool = False
 ) -> Tuple[DataLoader, DataLoader, int, int, list]:
-    
+
     num_labels = get_num_labels(args_train.labels_task_path)
 
     if isinstance(args_train.labels_protected_path, list):
@@ -211,7 +211,7 @@ def get_data(
     if return_prot_class_weights:
         num_classes_protected = get_class_weights(args_train.train_pkl, args_train.labels_protected_path, args_train.protected_key)
     else:
-        num_classes_protected = []   
+        num_classes_protected = []
 
     train_loader = get_data_loader(
         task_key = args_train.task_key,

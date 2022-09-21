@@ -48,11 +48,11 @@ class TrainLogger:
                 self.loss_dict[k] = v
 
         if (self.steps > 0) and (self.steps % self.logging_step == 0):
-            logs = {f"step_loss{self.suffix_fn(k)}": v / self.steps for k,v in self.loss_dict.items()} 
+            logs = {f"step_loss{self.suffix_fn(k)}": v / self.steps for k,v in self.loss_dict.items()}
             if lr:
                 logs["step_learning_rate"] = lr
             for key, value in logs.items():
-                self.writer.add_scalar(f'train/{key}', value, step // self.logging_step)            
+                self.writer.add_scalar(f'train/{key}', value, step // self.logging_step)
 
             self.steps = 0
             self.loss_dict = {}

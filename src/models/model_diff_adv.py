@@ -32,7 +32,7 @@ class AdvDiffModel(BasePruningModel):
         bottleneck_dropout: Optional[float] = None,
         **kwargs
     ):
-        super().__init__(model_name, **kwargs)       
+        super().__init__(model_name, **kwargs)
 
         self.num_labels_task = num_labels_task
         self.num_labels_protected = num_labels_protected
@@ -65,7 +65,7 @@ class AdvDiffModel(BasePruningModel):
         return self.task_head(self._forward(**x))
 
     def forward_protected(self, **x) -> torch.Tensor:
-        return self.adv_head(self._forward(**x)) 
+        return self.adv_head(self._forward(**x))
 
     def fit(
         self,
@@ -140,7 +140,7 @@ class AdvDiffModel(BasePruningModel):
 
         train_iterator = trange(num_epochs_total, desc=train_str.format(0, self.model_state, ""), leave=False, position=0)
         for epoch in train_iterator:
-            
+
             if epoch<num_epochs_warmup:
                 _adv_lambda = 0.
             else:
@@ -270,7 +270,7 @@ class AdvDiffModel(BasePruningModel):
                 outputs_task = self.task_head(hidden)
                 loss_task = loss_fn(outputs_task, labels_task.to(self.device))
                 loss += loss_task
-                
+
                 outputs_protected = self.adv_head.forward_reverse(hidden, lmbda = adv_lambda)
                 loss_protected = self._get_mean_loss(outputs_protected, labels_protected.to(self.device), loss_fn_protected)
                 loss += loss_protected
@@ -278,14 +278,14 @@ class AdvDiffModel(BasePruningModel):
                 if self.finetune_state:
                     loss_l0 = self._get_sparsity_pen(log_ratio, 0)
                     loss += loss_l0
-                else: 
+                else:
                     loss_l0 = torch.tensor(0.)
 
                 partial_losses += torch.tensor([loss_task, loss_protected, loss_l0]).detach()
 
             loss /= concrete_samples
             partial_losses /= concrete_samples
-            
+
             loss.backward()
 
             torch.nn.utils.clip_grad_norm_(self.parameters(), max_grad_norm)
@@ -304,7 +304,7 @@ class AdvDiffModel(BasePruningModel):
 
             epoch_iterator.set_description(epoch_str.format(step, loss.item(), partial_losses[2]), refresh=True)
 
-            self.global_step += 1     
+            self.global_step += 1
 
 
     def _init_optimizer_and_schedule(

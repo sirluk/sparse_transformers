@@ -203,7 +203,7 @@ def main():
 
     train_loader, val_loader, num_labels, num_labels_protected, num_labels_protected2 = \
         get_data(args_train, use_all_attr=True, debug=base_args.debug)
-    
+
     train_logger = get_logger(
         baseline = False,
         adv = (not base_args.modular),

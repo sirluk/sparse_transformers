@@ -75,7 +75,7 @@ def merge_diff_models(
             p_new = (torch.stack(p_list) / len(p_list)).sum(0)
             p.copy_(p_new)
         model_list.append(base_model)
-    else: 
+    else:
         sd = base_model.encoder.state_dict()
         model_list.append(BaseModel(model_name, sd))
     return merge_models(model_list)
@@ -203,5 +203,5 @@ def train_head(
     prefix = desc + ': ' if desc else ''
     print(f"{prefix}Final result after " +  train_str.format(epoch, result_str(result)))
     print(f"{prefix}Best result " +  train_str.format(best_epoch, result_str(best_result)))
-    
+
     return head

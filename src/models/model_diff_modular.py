@@ -151,7 +151,7 @@ class ModularDiffModel(BasePruningModel):
 
         train_iterator = trange(num_epochs_total, desc=train_str.format(0, self.model_state, ""), leave=False, position=0)
         for epoch in train_iterator:
-            
+
             if epoch<num_epochs_warmup:
                 _adv_lambda = 0.
             else:
@@ -331,7 +331,7 @@ class ModularDiffModel(BasePruningModel):
 
             self.optimizer.step()
             self.zero_grad()
-            
+
             # END STEP TASK
             ##################################################
 
@@ -369,7 +369,7 @@ class ModularDiffModel(BasePruningModel):
 
             self.optimizer.step()
             self.zero_grad()
-            
+
             # END STEP DEBIAS
             ##################################################
 
@@ -449,7 +449,7 @@ class ModularDiffModel(BasePruningModel):
                     "params": [p for n,p in self.encoder.named_parameters() if n[-9:] == f".original"],
                     "lr": learning_rate,
                     "weight_decay": weight_decay
-                }                
+                }
             )
 
         self.optimizer = AdamW(optimizer_param_groups, betas=(0.9, 0.999), eps=1e-08)
