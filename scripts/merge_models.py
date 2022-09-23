@@ -24,15 +24,12 @@ LOG_DIR = "logs_custom"
 LOGGER_NAME = "merged_mask_model_seed0"
 MODEL_ADV_CLS = AdvDiffModel
 MODEL_TASK_CLS = TaskModel
-# CP = {
-#     "task": "/share/home/lukash/pan16/bertl4/res_gender/cp/bert_uncased_L-4_H-256_A-4-task_baseline-seed0.pt",
-#     "gender": "/share/rk8/home/lukash/sparse_transformers/checkpoints_custom/adverserial-diff_pruning_0.1-bert_uncased_L-4_H-256_A-4-64-2e-05-cp_init-gender-seed0.pt",
-#     "age": "/share/rk8/home/lukash/sparse_transformers/checkpoints_custom/adverserial-diff_pruning_0.1-bert_uncased_L-4_H-256_A-4-64-2e-05-cp_init-age-seed0.pt"
-# }
 CP = {
-    "gender": "/share/home/lukash/pan16/bertl4/res_gender/cp/bert_uncased_L-4_H-256_A-4-adv_fixmask0.1-seed0.pt",
-    "age": "/share/home/lukash/pan16/bertl4/res_age/cp/adverserial-diff_pruning_0.1-bert_uncased_L-4_H-256_A-4-64-2e-05-age-seed0.pt"
+    "task": "/share/home/lukash/pan16/bertl4/cp/task-baseline-bert_uncased_L-4_H-256_A-4-64-2e-05-seed0.pt",
+    "gender": "/share/home/lukash/pan16/bertl4/cp_init/task-baseline-bert_uncased_L-4_H-256_A-4-64-2e-05-seed0.pt/cp/adverserial-diff_pruning_0.1-bert_uncased_L-4_H-256_A-4-64-2e-05-cp_init-gender-seed0.pt",
+    "age": "/share/home/lukash/pan16/bertl4/cp_init/task-baseline-bert_uncased_L-4_H-256_A-4-64-2e-05-seed0.pt/cp/adverserial-diff_pruning_0.1-bert_uncased_L-4_H-256_A-4-64-2e-05-cp_init-age-seed0.pt"
 }
+
 
 def main():
 
@@ -45,24 +42,29 @@ def main():
         model = merge_diff_models([model_gender, model_age])
 
     # # TEMP - for debugging
-    # import IPython; IPython.embed(); exit(1)
     # from src.model_functions import get_param_from_name
-    # samples = [(i, n1) for (i, ((n1, p1), (n2, p2))) in enumerate(zip(model_gender.named_parameters(), model_age.named_parameters())) if p1.flatten()[0].item()!=p2.flatten()[0].item() and n1[-8:]=="original"]
-    # n = [n for n,p in model.named_parameters()][samples[0][0]]
-    # _np = n.split(".")
-    # np = ".".join(_np[:-1] + ["parametrizations", _np[-1], "original"])
-    # np_diff = ".".join(_np[:-1] + ["parametrizations", _np[-1], "0", "diff_weight"])
-    # p = get_param_from_name(model, n)
-    # pg = get_param_from_name(model_gender, np)
-    # pa = get_param_from_name(model_age, np)
-    # pg_diff = get_param_from_name(model_gender, np_diff)
-    # pa_diff = get_param_from_name(model_age, np_diff)
-    # test = [x.flatten()[0].item() for x in [p, pg, pa, pg_diff, pa_diff]]
+    
+    # samples = []
+    # for n, p in model_task.encoder.named_parameters():
+    #     _n = n.split(".")
+    #     np = ".".join(_n[:-1] + ["parametrizations", _n[-1], "original"])
+    #     np_diff = ".".join(_n[:-1] + ["parametrizations", _n[-1], "0", "diff_weight"])
+    #     pg_diff = get_param_from_name(model_gender.encoder, np_diff)
+    #     pa_diff = get_param_from_name(model_age.encoder, np_diff)
+    #     if p.flatten()[1] != pg_diff.flatten()[1] != pa_diff.flatten()[1]:
+    #         samples.append((n, np, np_diff))
+
+    # n, np, np_diff = samples[-1]
+    # p = get_param_from_name(model_task.encoder, n)
+    # pg = get_param_from_name(model_gender.encoder, np)
+    # pa = get_param_from_name(model_age.encoder, np)
+    # pg_diff = get_param_from_name(model_gender.encoder, np_diff)
+    # pa_diff = get_param_from_name(model_age.encoder, np_diff)
     # import IPython; IPython.embed(); exit(1)
+    # # TEMP - for debugging
 
     model.to(DEVICE)
     model.eval()
-
 
     with open("../cfg.yml", "r") as f:
         cfg = yaml.safe_load(f)
@@ -81,7 +83,7 @@ def main():
     train_data = generate_embeddings(model, train_loader, forward_fn = lambda m, x: m._forward(**x))
     val_data = generate_embeddings(model, val_loader, forward_fn = lambda m, x: m._forward(**x))
 
-    # TODO: Training Loop for task
+    # Training Loop for task
     ds_train = TensorDataset(train_data[0], train_data[1])
     ds_val = TensorDataset(val_data[0], val_data[1])
     train_loader = DataLoader(ds_train, shuffle=True, batch_size=args_attack.attack_batch_size, drop_last=False)
