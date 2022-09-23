@@ -1,5 +1,6 @@
 import os
 import math
+import warnings
 from enum import Enum, auto
 from tqdm import tqdm
 from functools import reduce
@@ -14,6 +15,7 @@ from typing import Union, List, Tuple, Optional, Dict, Callable
 
 from src.models.weight_parametrizations import DiffWeightFinetune, DiffWeightFixmask
 from src.utils import dict_to_device
+
 
 class ModelState(Enum):
     INIT = auto()
@@ -30,21 +32,26 @@ class BaseModel(torch.nn.Module):
         else:
             return self.encoder
 
+
     @property
     def device(self) -> torch.device:
         return next(self.encoder.parameters()).device
+
 
     @property
     def model_type(self) -> str:
         return self.encoder_module.config.model_type
 
+
     @property
     def model_name(self) -> str:
         return self.encoder_module.config._name_or_path
 
+
     @property
     def hidden_size(self) -> int:
         return self.encoder_module.embeddings.word_embeddings.embedding_dim
+
 
     @property
     def total_layers(self) -> int:
@@ -54,6 +61,7 @@ class BaseModel(torch.nn.Module):
             if k in cfg.__dict__:
                 return getattr(cfg, k) + 1 # +1 for embedding layer and last layer
         raise Exception("number of layers of pre trained model could not be determined")
+
 
     def __init__(self, model_name: str, model_state_dict: OrderedDict = None, **kwargs):
         super().__init__()
@@ -67,8 +75,10 @@ class BaseModel(torch.nn.Module):
 
         self.in_size_heads = self.hidden_size
 
+
     def _forward(self, **x) -> torch.Tensor:
         return self.encoder(**x)[0][:,0]
+
 
     @torch.no_grad()
     def _evaluate(
@@ -116,6 +126,7 @@ class BaseModel(torch.nn.Module):
 
         return result
 
+
     def _get_mean_loss(self, outputs: Union[torch.Tensor, List[torch.Tensor]], labels: torch.Tensor, loss_fn: Callable) -> torch.Tensor:
         if isinstance(outputs, torch.Tensor):
             outputs = [outputs]
@@ -123,6 +134,26 @@ class BaseModel(torch.nn.Module):
         for output in outputs:
             losses.append(loss_fn(output, labels))
         return torch.stack(losses).mean()
+
+
+    def get_layer_idx_from_module(self, module_name: str) -> int:
+        # get layer index based on module name
+        if self.model_type == "xlnet":
+            search_str_emb = "word_embedding"
+            search_str_hidden = "layer"
+        else:
+            search_str_emb = "embeddings"
+            search_str_hidden = "encoder.layer"
+
+        if search_str_emb in module_name:
+            return 0
+        elif search_str_hidden in module_name:
+            return int(module_name.split(search_str_hidden + ".")[1].split(".")[0]) + 1
+        elif 'pooler.dense' in module_name:
+            return self.total_layers - 1
+        else:
+            warnings.warn(f"layer idx could not be determined for module_name {module_name}")
+
 
     def to(self, device: Union[list, Union[str, torch.device]], *args, **kwargs) -> None:
         self._remove_parallel()
@@ -135,32 +166,41 @@ class BaseModel(torch.nn.Module):
         else:
             super().to(device)
 
+
     def cpu(self):
         self._remove_parallel()
         super().cpu()
+
 
     def cuda(self, *args, **kwargs) -> None:
         self._remove_parallel()
         super().cuda(*args, **kwargs)
 
+
     def _remove_parallel(self) -> None:
         if isinstance(self.encoder, torch.nn.DataParallel):
             self.encoder = self.encoder.module
 
+
     def forward(self, **x) -> torch.Tensor:
         raise NotImplementedError
+
 
     def evaluate(self, *args, **kwargs):
         raise NotImplementedError
 
+
     def _step(self, *args, **kwargs):
         raise NotImplementedError
+
 
     def _init_optimizer_and_schedule(self, *args, **kwargs):
         raise NotImplementedError
 
+
     def save_checkpoint(self, output_dir: Union[str, os.PathLike], *args, **kwargs) -> None:
         raise NotImplementedError
+
 
     @classmethod
     def load_checkpoint(cls, filepath: Union[str, os.PathLike], *args, **kwargs) -> torch.nn.Module:
@@ -180,13 +220,16 @@ class BasePruningModel(BaseModel):
     def parametrized(self) -> bool:
         return (self.model_state == ModelState.FINETUNING or self.model_state == ModelState.FIXMASK)
 
+
     @property
     def fixmask_state(self) -> bool:
         return self.model_state == ModelState.FIXMASK
 
+
     @property
     def finetune_state(self) -> bool:
         return self.model_state == ModelState.FINETUNING
+
 
     @property
     def n_parametrizations(self) -> int:
@@ -209,23 +252,6 @@ class BasePruningModel(BaseModel):
         else:
             check_fn = lambda m: len(m._parameters)>0
         return [(n,m) if return_names else m for n,m in self.encoder.named_modules() if check_fn(m)]
-
-
-    def get_layer_idx_from_module(self, n: str) -> int:
-        # get layer index based on module name
-        if self.model_type == "xlnet":
-            search_str_emb = "word_embedding"
-            search_str_hidden = "layer"
-        else:
-            search_str_emb = "embeddings"
-            search_str_hidden = "encoder.layer"
-
-        if search_str_emb in n:
-            return 0
-        elif search_str_hidden in n:
-            return int(n.split(search_str_hidden + ".")[1].split(".")[0]) + 1
-        else:
-            return self.total_layers - 1
 
 
     def _init_sparsity_pen(self, sparsity_pen: Union[float, List[float]]) -> None:
