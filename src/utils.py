@@ -80,9 +80,10 @@ def get_name_for_run(
     if baseline:
         run_parts.append("baseline")
     else:
-        run_parts.append(
-            f"diff_pruning_{args_train.fixmask_pct if args_train.num_epochs_fixmask>0 else 'no_fixmask'}"
-        )
+        run_parts.extend([
+            f"diff_pruning_{args_train.fixmask_pct if args_train.num_epochs_fixmask>0 else 'no_fixmask'}",
+            f"a_samples_{args_train.concrete_samples}" if args_train.concrete_samples > 1 else None
+        ])
         if modular:
             run_parts.extend([
                 "sparse_task" if args_train.modular_sparse_task else None,
