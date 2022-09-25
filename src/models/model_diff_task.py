@@ -318,6 +318,7 @@ class TaskDiffModel(BasePruningModel):
         seed: Optional[int] = None
     ) -> None:
         info_dict = {
+            "cls_name": self.__class__.__name__,
             "model_name": self.model_name,
             "num_labels": self.num_labels,
             "dropout": self.dropout,

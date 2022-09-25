@@ -460,6 +460,7 @@ class ModularDiffModel_2attr(ModularDiffModel):
         seed: Optional[int] = None
     ) -> None:
         info_dict = {
+            "cls_name": self.__class__.__name__,
             "model_name": self.model_name,
             "num_labels_task": self.num_labels_task,
             "num_labels_protected": self.num_labels_protected,

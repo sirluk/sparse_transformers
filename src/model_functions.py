@@ -205,3 +205,14 @@ def train_head(
     print(f"{prefix}Best result " +  train_str.format(best_epoch, result_str(best_result)))
 
     return head
+
+
+def model_factory(
+    cp_path: Union[str, Path],
+    map_location: Union[str, torch.device] = torch.device('cpu'),
+    **kwargs
+    ):
+    info_dict = torch.load(cp_path, map_location=map_location)
+    model_cls = eval(info_dict["cls_name"])
+    model_cls_kwargs = {k:v for k,v in kwargs.items() if k in model_cls.load_checkpoint.__code__.co_varnames}
+    return model_cls.load_checkpoint(cp_path, map_location=map_location, **model_cls_kwargs)
