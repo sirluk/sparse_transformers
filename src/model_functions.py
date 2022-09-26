@@ -6,7 +6,6 @@ from tqdm import tqdm, trange
 import torch
 from torch.optim import Optimizer
 from torch.utils.data import DataLoader
-from transformers import AutoModel
 
 from src.models.model_base import BaseModel, BasePruningModel
 from src.models.model_diff_modular import ModularDiffModel
@@ -19,6 +18,16 @@ from src.training_logger import TrainLogger
 from src.utils import dict_to_device
 
 from typing import Optional, Union, Callable, Dict
+
+
+AVAILABLE_MODEL_CLASSES = [
+    TaskModel,
+    AdvModel,
+    TaskDiffModel,
+    AdvDiffModel,
+    ModularModel,
+    ModularDiffModel
+]
 
 
 def get_param_from_name(model, param_name):
@@ -214,5 +223,8 @@ def model_factory(
     ):
     info_dict = torch.load(cp_path, map_location=map_location)
     model_cls = eval(info_dict["cls_name"])
-    model_cls_kwargs = {k:v for k,v in kwargs.items() if k in model_cls.load_checkpoint.__code__.co_varnames}
+    assert model_cls in AVAILABLE_MODEL_CLASSES, \
+        f"Model Class {model_cls} is not in available model classes\n{'\n'.join(AVAILABLE_MODEL_CLASSES)}"
+    load_cp_args = model_cls.load_checkpoint.__code__.co_varnames
+    model_cls_kwargs = {k:v for k,v in kwargs.items() if k in load_cp_args}
     return model_cls.load_checkpoint(cp_path, map_location=map_location, **model_cls_kwargs)
