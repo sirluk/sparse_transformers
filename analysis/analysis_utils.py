@@ -112,10 +112,11 @@ def get_nonzero_dicts(model_list: List[List[Tuple]]):
         if "pooler.dense" in k:
             continue
         k = ".".join(k.split(".")[:-1])
-        weight_sums = v.bool().sum(0)
+        v_bool = v.bool()
+        weight_sums = torch.maximum(v_bool.sum(0), (~v_bool).sum(0))
         total = weight_sums.numel()
         n_nonzero = [total]
-        for i in range(len(model_list)):
+        for i in range(len(model_list)+1):
             n_nonzero.append((weight_sums == i).sum().item())
         # n_some_nonzero = torch.logical_and((weight_sums>0), (weight_sums<5)).sum().item()
         res = np.array(n_nonzero)
