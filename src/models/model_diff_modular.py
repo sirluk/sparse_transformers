@@ -68,7 +68,6 @@ class ModularDiffModel(BasePruningModel):
             )
 
         self.sparse_task = True
-        self.set_debiased(False)
 
     def _forward(self, **x) -> torch.Tensor:
         hidden = super()._forward(**x)
@@ -152,6 +151,8 @@ class ModularDiffModel(BasePruningModel):
         else:
             assert self.n_parametrizations == 1 + sparse_task, f"model has been trained with sparse_task={sparse_task}"
             assert self.finetune_state or (self.fixmask_state and num_epochs_finetune==0), "model is in fixmask state but num_epochs_fintune>0"
+
+        self.set_debiased(False)
 
         self._init_optimizer_and_schedule(
             train_steps_finetune,
