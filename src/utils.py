@@ -2,12 +2,10 @@ import os
 import argparse
 from pathlib import Path
 import torch
-from torch.utils.data import DataLoader
 
 from typing import Union, List, Tuple, Callable, Dict, Optional
 
 from src.training_logger import TrainLogger
-from src.data_handler import get_data
 from src.metrics import accuracy
 
 

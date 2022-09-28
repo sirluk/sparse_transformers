@@ -3,20 +3,14 @@ import argparse
 from pathlib import Path
 import torch
 
-from src.models.model_diff_adv import AdvDiffModel
-from src.models.model_diff_task import TaskDiffModel
-from src.models.model_diff_modular import ModularDiffModel
-from src.models.model_adv import AdvModel
-from src.models.model_task import TaskModel
-from src.models.model_modular import ModularModel
 from src.training_logger import TrainLogger
 from src.adv_attack import run_adv_attack
 from src.data_handler import get_data
+from src.model_functions import model_factory
 from src.utils import (
     get_device,
     set_num_epochs_debug,
     set_dir_debug,
-    get_callables,
     set_optional_args
 )
 
@@ -27,7 +21,7 @@ torch.manual_seed(0)
 CP_DIR = "/share/home/lukash/pan16/bertl4/cp/"
 # CP = "task-baseline-bert_uncased_L-4_H-256_A-4-64-2e-05-seed4.pt"
 CP = "task-diff_pruning_0.05-bert_uncased_L-4_H-256_A-4-64-2e-05-seed4.pt"
-MODEL_CLS = TaskDiffModel
+LOAD_CP_KWARGS = {"remove_parametrizations": True}
 ### DEFINE MANUALLY
 
 
@@ -58,7 +52,7 @@ def main():
     device = get_device(not base_args.cpu, base_args.gpu_id)
     print(f"Device: {device}")
 
-    train_loader, val_loader, num_labels, num_labels_protected, protected_key, protected_class_weights = get_data(
+    train_loader, val_loader, _, num_labels_protected, protected_key, protected_class_weights = get_data(
         args_train = args_train,
         use_all_attr = True,
         compute_class_weights = (not base_args.no_weighted_loss),
@@ -66,7 +60,7 @@ def main():
         debug = base_args.debug
     )
 
-    trainer = MODEL_CLS.load_checkpoint(f"{CP_DIR}/{CP}", remove_parametrizations=True)
+    trainer = model_factory(f"{CP_DIR}/{CP}", **LOAD_CP_KWARGS)
     trainer.to(device)
 
     logger_name = "-".join([x for x in [
@@ -87,12 +81,11 @@ def main():
     run_adv_attack(
         base_args = base_args,
         args_train = args_train,
-        args_train = args_train,
+        args_attack = args_train,
         trainer = trainer,
         train_logger = train_logger,
         train_loader = train_loader,
         val_loader = val_loader,
-        num_labels = num_labels,
         num_labels_protected = num_labels_protected,
         protected_key = protected_key,
         protected_class_weights = protected_class_weights

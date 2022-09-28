@@ -84,15 +84,14 @@ def run_adv_attack(
     train_logger,
     train_loader,
     val_loader,
-    num_labels,
     num_labels_protected,
     protected_key,
     protected_class_weights
 ):
 
-    if isinstance(args_train.labels_protected_path, (list, tuple)): 
-        if isinstance(num_labels_protected, int):
-            train_loader, val_loader, num_labels, num_labels_protected, protected_key, protected_class_weights = get_data(
+    if isinstance(num_labels_protected, int):
+        if isinstance(args_train.protected_key, (list, tuple)): 
+            train_loader, val_loader, _, num_labels_protected, protected_key, protected_class_weights = get_data(
                 args_train,
                 use_all_attr = True,
                 compute_class_weights = args_train.weighted_loss_protected,
@@ -103,16 +102,14 @@ def run_adv_attack(
             val_data = generate_embeddings(trainer, val_loader, forward_fn = lambda m, x: m._forward(**x))
             gen_emb = False
         else:
+            num_labels_protected = [num_labels_protected]
+            protected_key = [protected_key]
+            protected_class_weights = [protected_class_weights]
             gen_emb = True
-        labels_protected_path = args_train.labels_protected_path
     else:
-        labels_protected_path = [args_train.labels_protected_path]
-        num_labels_protected = [num_labels_protected]
-        protected_key = [protected_key]
-        protected_class_weights = [protected_class_weights]
         gen_emb = True
 
-    for (i, (p, num_lbl_prot, prot_k, prot_w)) in enumerate(zip(labels_protected_path, num_labels_protected, protected_key, protected_class_weights)):
+    for (i, (num_lbl_prot, prot_k, prot_w)) in enumerate(zip(num_labels_protected, protected_key, protected_class_weights)):
 
         if not gen_emb: 
             train_loader = DataLoader(
