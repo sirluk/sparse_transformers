@@ -1,10 +1,13 @@
+import os
 import argparse
 from pathlib import Path
 import torch
+from torch.utils.data import DataLoader
 
 from typing import Union, List, Tuple, Callable, Dict, Optional
 
 from src.training_logger import TrainLogger
+from src.data_handler import get_data
 from src.metrics import accuracy
 
 
@@ -29,7 +32,7 @@ def dict_to_device(d: dict, device: Union[str, torch.device]) -> dict:
     return {k:v.to(device) for k,v in d.items()}
 
 
-def get_device(gpu: bool, gpu_id: Union[int, list]) -> List[torch.device]:
+def get_device(gpu: bool, gpu_id: Union[int, list, tuple]) -> List[torch.device]:
     if gpu and torch.cuda.is_available():
         if isinstance(gpu_id, int): gpu_id = [gpu_id]
         device = [torch.device(f"cuda:{int(i)}") for i in gpu_id]
@@ -90,7 +93,12 @@ def get_name_for_run(
                 "merged_cutoff" if args_train.modular_merged_cutoff else None
             ])
 
-    prot_attr = args_train.protected_key if isinstance(args_train.protected_key, str) else args_train.protected_key[prot_key_idx]
+    if isinstance(args_train.protected_key, str):
+        prot_attr = args_train.protected_key
+    elif prot_key_idx is not None:
+        prot_attr = args_train.protected_key[prot_key_idx]
+    else:
+        prot_attr = "_".join(args_train.protected_key)
 
     run_parts.extend([
         f"bottleneck_{args_train.bottleneck_dim}" if args_train.bottleneck else None,
@@ -98,7 +106,7 @@ def get_name_for_run(
         str(args_train.batch_size),
         str(args_train.learning_rate),
         "cp_init" if cp_path else None,
-        "weighted_loss_prot" if args_train.weighted_loss_protected and (adv or modular) else None,
+        "weighted_loss_prot" if args_train.weighted_loss_protected else None,
         prot_attr if (adv or modular) else None,
         f"seed{seed}" if seed is not None else None,
         suffix,
@@ -113,7 +121,7 @@ def get_logger(
     modular: bool,
     args_train: argparse.Namespace,
     cp_path: bool = False,
-    prot_key_idx: int = 0,
+    prot_key_idx: Optional[int] = None,
     seed: Optional[int] = None,
     debug: bool = False,
     suffix: Optional[str] = None
@@ -144,7 +152,10 @@ def get_logger_custom(
     )
 
 
-def get_callables(num_labels: int, class_weights: Optional[Union[int, float, list, torch.tensor]] = None) -> Tuple[Callable, Callable, Dict[str, Callable]]:
+def get_callables(
+    num_labels: int,
+    class_weights: Optional[Union[int, float, torch.tensor, list, tuple]] = None
+) -> Tuple[Callable, Callable, Dict[str, Callable]]:
 
     if class_weights is not None:
         if not isinstance(class_weights, torch.Tensor):
@@ -165,6 +176,22 @@ def get_callables(num_labels: int, class_weights: Optional[Union[int, float, lis
         "balanced_acc": lambda x, y: accuracy(x, y, balanced=True)
     }
     return loss_fn, pred_fn, metrics
+
+
+def get_callables_wrapper(
+    num_labels: int,
+    num_labels_protected: Union[int, list, tuple],
+    protected_class_weights: Optional[Union[int, list, tuple]] = None
+):
+    loss_fn, pred_fn, metrics = get_callables(num_labels)
+    if isinstance(num_labels_protected, (list, tuple)):
+        callables = []
+        for n, w in zip(num_labels_protected, protected_class_weights):
+            callables.append(get_callables(n, class_weights = w))
+        loss_fn_protected, pred_fn_protected, metrics_protected = zip(*callables)
+    else:
+        loss_fn_protected, pred_fn_protected, metrics_protected = get_callables(num_labels_protected, class_weights = protected_class_weights)
+    return loss_fn, pred_fn, metrics, loss_fn_protected, pred_fn_protected, metrics_protected
 
 
 def set_optional_args(args_obj: argparse.Namespace, optional_args: list) -> argparse.Namespace:

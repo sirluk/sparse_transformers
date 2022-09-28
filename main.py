@@ -1,6 +1,7 @@
 import argparse
 import ruamel.yaml as yaml
 import torch
+from torch.utils.data import TensorDataset, DataLoader
 
 from src.models.model_diff_modular import ModularDiffModel
 from src.models.model_diff_adv import AdvDiffModel
@@ -8,22 +9,32 @@ from src.models.model_diff_task import TaskDiffModel
 from src.models.model_adv import AdvModel
 from src.models.model_task import TaskModel
 from src.models.model_modular import ModularModel
-from src.model_functions import load_cp
-from src.adv_attack import adv_attack
+from src.model_functions import model_factory, generate_embeddings
+from src.adv_attack import run_adv_attack
 from src.data_handler import get_data
 from src.utils import (
     get_device,
     set_num_epochs_debug,
     set_dir_debug,
     get_logger,
-    get_callables,
+    get_callables_wrapper,
     set_optional_args
 )
 
 
-def train_diff_pruning_task(device, train_loader, val_loader, num_labels, train_logger, args_train, encoder_state_dict = None, seed = None):
-
-    loss_fn, pred_fn, metrics = get_callables(num_labels)
+def train_diff_pruning_task(
+    device,
+    train_loader,
+    val_loader,
+    num_labels,
+    loss_fn,
+    pred_fn,
+    metrics,
+    train_logger,
+    args_train,
+    encoder_state_dict = None,
+    seed = None
+):
 
     trainer = TaskDiffModel(
         model_name = args_train.model_name,
@@ -70,15 +81,29 @@ def train_diff_pruning_task(device, train_loader, val_loader, num_labels, train_
     return trainer
 
 
-def train_diff_pruning_adv(device, train_loader, val_loader, num_labels, num_labels_protected, protected_class_weights, train_logger, args_train, encoder_state_dict = None, seed = None):
-
-    loss_fn, pred_fn, metrics = get_callables(num_labels)
-    loss_fn_protected, pred_fn_protected, metrics_protected = get_callables(num_labels_protected, class_weights = protected_class_weights)
+def train_diff_pruning_adv(
+    device,
+    train_loader,
+    val_loader,
+    num_labels,
+    num_labels_protected_list,
+    protected_key_list,
+    loss_fn,
+    pred_fn,
+    metrics,
+    loss_fn_protected_list,
+    pred_fn_protected_list,
+    metrics_protected_list,
+    train_logger,
+    args_train,
+    encoder_state_dict = None,
+    seed = None
+):
 
     trainer = AdvDiffModel(
         model_name = args_train.model_name,
         num_labels_task = num_labels,
-        num_labels_protected = num_labels_protected,
+        num_labels_protected = num_labels_protected_list,
         task_dropout = args_train.task_dropout,
         task_n_hidden = args_train.task_n_hidden,
         adv_dropout = args_train.adv_dropout,
@@ -97,9 +122,9 @@ def train_diff_pruning_adv(device, train_loader, val_loader, num_labels, num_lab
         loss_fn = loss_fn,
         pred_fn = pred_fn,
         metrics = metrics,
-        loss_fn_protected = loss_fn_protected,
-        pred_fn_protected = pred_fn_protected,
-        metrics_protected = metrics_protected,
+        loss_fn_protected = loss_fn_protected_list,
+        pred_fn_protected = pred_fn_protected_list,
+        metrics_protected = metrics_protected_list,
         num_epochs_warmup = args_train.num_epochs_warmup,
         num_epochs_finetune = args_train.num_epochs_finetune,
         num_epochs_fixmask = args_train.num_epochs_fixmask,
@@ -120,6 +145,7 @@ def train_diff_pruning_adv(device, train_loader, val_loader, num_labels, num_lab
         max_grad_norm = args_train.max_grad_norm,
         output_dir = args_train.output_dir,
         fixmask_pct = args_train.fixmask_pct,
+        protected_key = protected_key_list,
         checkpoint_name = train_logger.logger_name + ".pt",
         seed = seed
     )
@@ -129,15 +155,29 @@ def train_diff_pruning_adv(device, train_loader, val_loader, num_labels, num_lab
     return trainer
 
 
-def train_diff_pruning_modular(device, train_loader, val_loader, num_labels, num_labels_protected, protected_class_weights, train_logger, args_train, encoder_state_dict = None, seed = None):
-
-    loss_fn, pred_fn, metrics = get_callables(num_labels)
-    loss_fn_protected, pred_fn_protected, metrics_protected = get_callables(num_labels_protected, class_weights = protected_class_weights)
+def train_diff_pruning_modular(
+    device,
+    train_loader, 
+    val_loader,
+    num_labels,
+    num_labels_protected_list,
+    protected_key_list,
+    loss_fn,
+    pred_fn,
+    metrics,
+    loss_fn_protected_list,
+    pred_fn_protected_list,
+    metrics_protected_list,
+    train_logger,
+    args_train,
+    encoder_state_dict = None,
+    seed = None
+):
 
     trainer = ModularDiffModel(
         model_name = args_train.model_name,
         num_labels_task = num_labels,
-        num_labels_protected = num_labels_protected,
+        num_labels_protected = num_labels_protected_list,
         task_dropout = args_train.task_dropout,
         task_n_hidden = args_train.task_n_hidden,
         adv_dropout = args_train.adv_dropout,
@@ -157,9 +197,9 @@ def train_diff_pruning_modular(device, train_loader, val_loader, num_labels, num
         loss_fn = loss_fn,
         pred_fn = pred_fn,
         metrics = metrics,
-        loss_fn_protected = loss_fn_protected,
-        pred_fn_protected = pred_fn_protected,
-        metrics_protected = metrics_protected,
+        loss_fn_protected = loss_fn_protected_list,
+        pred_fn_protected = pred_fn_protected_list,
+        metrics_protected = metrics_protected_list,
         num_epochs_warmup = args_train.num_epochs_warmup,
         num_epochs_finetune = args_train.num_epochs_finetune,
         num_epochs_fixmask = args_train.num_epochs_fixmask,
@@ -183,6 +223,7 @@ def train_diff_pruning_modular(device, train_loader, val_loader, num_labels, num
         merged_cutoff = args_train.modular_merged_cutoff,
         merged_min_pct = args_train.modular_merged_min_pct,
         fixmask_pct = args_train.fixmask_pct,
+        protected_key = protected_key_list,
         checkpoint_name = train_logger.logger_name + ".pt",
         seed = seed
     )
@@ -192,9 +233,19 @@ def train_diff_pruning_modular(device, train_loader, val_loader, num_labels, num
     return trainer
 
 
-def train_baseline_task(device, train_loader, val_loader, num_labels, train_logger, args_train, encoder_state_dict = None, seed = None):
-
-    loss_fn, pred_fn, metrics = get_callables(num_labels)
+def train_baseline_task(
+    device,
+    train_loader,
+    val_loader,
+    num_labels,
+    loss_fn,
+    pred_fn,
+    metrics,
+    train_logger,
+    args_train,
+    encoder_state_dict = None,
+    seed = None
+):
 
     trainer = TaskModel(
         model_name = args_train.model_name,
@@ -231,15 +282,29 @@ def train_baseline_task(device, train_loader, val_loader, num_labels, train_logg
     return trainer
 
 
-def train_baseline_adv(device, train_loader, val_loader, num_labels, num_labels_protected, protected_class_weights, train_logger, args_train, encoder_state_dict = None, seed = None):
-
-    loss_fn, pred_fn, metrics = get_callables(num_labels)
-    loss_fn_protected, pred_fn_protected, metrics_protected = get_callables(num_labels_protected, class_weights = protected_class_weights)
+def train_baseline_adv(
+    device,
+    train_loader,
+    val_loader,
+    num_labels,
+    num_labels_protected_list,
+    protected_key_list,
+    loss_fn,
+    pred_fn,
+    metrics,
+    loss_fn_protected_list,
+    pred_fn_protected_list,
+    metrics_protected_list,
+    train_logger,
+    args_train,
+    encoder_state_dict = None,
+    seed = None
+):
 
     trainer = AdvModel(
         model_name = args_train.model_name,
         num_labels_task = num_labels,
-        num_labels_protected = num_labels_protected,
+        num_labels_protected = num_labels_protected_list,
         task_dropout = args_train.task_dropout,
         task_n_hidden = args_train.task_n_hidden,
         adv_dropout = args_train.adv_dropout,
@@ -258,9 +323,9 @@ def train_baseline_adv(device, train_loader, val_loader, num_labels, num_labels_
         loss_fn = loss_fn,
         pred_fn = pred_fn,
         metrics = metrics,
-        loss_fn_protected = loss_fn_protected,
-        pred_fn_protected = pred_fn_protected,
-        metrics_protected = metrics_protected,
+        loss_fn_protected = loss_fn_protected_list,
+        pred_fn_protected = pred_fn_protected_list,
+        metrics_protected = metrics_protected_list,
         num_epochs = args_train.num_epochs,
         num_epochs_warmup = args_train.num_epochs_warmup,
         adv_lambda = args_train.adv_lambda,
@@ -271,6 +336,7 @@ def train_baseline_adv(device, train_loader, val_loader, num_labels, num_labels_
         optimizer_warmup_steps = args_train.optimizer_warmup_steps,
         max_grad_norm = args_train.max_grad_norm,
         output_dir = args_train.output_dir,
+        protected_key = protected_key_list,
         checkpoint_name = train_logger.logger_name + ".pt",
         seed = seed
     )
@@ -280,15 +346,29 @@ def train_baseline_adv(device, train_loader, val_loader, num_labels, num_labels_
     return trainer
 
 
-def train_baseline_modular(device, train_loader, val_loader, num_labels, num_labels_protected, protected_class_weights, train_logger, args_train, encoder_state_dict = None, seed = None):
-
-    loss_fn, pred_fn, metrics = get_callables(num_labels)
-    loss_fn_protected, pred_fn_protected, metrics_protected = get_callables(num_labels_protected, class_weights = protected_class_weights)
+def train_baseline_modular(
+    device,
+    train_loader,
+    val_loader,
+    num_labels,
+    num_labels_protected_list,
+    protected_key_list,
+    loss_fn,
+    pred_fn,
+    metrics,
+    loss_fn_protected_list,
+    pred_fn_protected_list,
+    metrics_protected_list,
+    train_logger,
+    args_train,
+    encoder_state_dict = None,
+    seed = None
+):
 
     trainer = ModularModel(
         model_name = args_train.model_name,
         num_labels_task = num_labels,
-        num_labels_protected = num_labels_protected,
+        num_labels_protected = num_labels_protected_list,
         task_dropout = args_train.task_dropout,
         task_n_hidden = args_train.task_n_hidden,
         adv_dropout = args_train.adv_dropout,
@@ -308,9 +388,9 @@ def train_baseline_modular(device, train_loader, val_loader, num_labels, num_lab
         loss_fn = loss_fn,
         pred_fn = pred_fn,
         metrics = metrics,
-        loss_fn_protected = loss_fn_protected,
-        pred_fn_protected = pred_fn_protected,
-        metrics_protected = metrics_protected,
+        loss_fn_protected = loss_fn_protected_list,
+        pred_fn_protected = pred_fn_protected_list,
+        metrics_protected = metrics_protected_list,
         num_epochs_warmup = args_train.num_epochs_warmup,
         num_epochs = args_train.num_epochs,
         adv_lambda = args_train.adv_lambda,
@@ -321,6 +401,7 @@ def train_baseline_modular(device, train_loader, val_loader, num_labels, num_lab
         optimizer_warmup_steps = args_train.optimizer_warmup_steps,
         max_grad_norm = args_train.max_grad_norm,
         output_dir = args_train.output_dir,
+        protected_key = protected_key_list,
         checkpoint_name = train_logger.logger_name + ".pt",
         seed = seed
     )
@@ -342,10 +423,8 @@ def main():
     parser.add_argument("--cpu", action="store_true", help="Run on cpu")
     parser.add_argument("--no_adv_attack", action="store_true", help="Set if you do not want to run adverserial attack after training")
     parser.add_argument("--cp_path", type=str, help="Overwrite pre-trained encoder weights")
-    parser.add_argument("--cp_is_sd", action="store_true", help="If checkpoint is a state dict")
-    parser.add_argument("--cp_model_type", type=str, help="Model type from which to load encoder weights as string (not required if loading state dict directly)")
     parser.add_argument("--cp_modular_biased", action="store_true", help="If loading checkpoint from modular model set debiased state")
-    parser.add_argument("--prot_key_idx", type=int, default=0, help="If protected key is type list: index of key to use")
+    parser.add_argument("--prot_key_idx", type=int, help="If protected key is type list: index of key to use, if none use all available attributes for taining")
     parser.add_argument("--debug", action="store_true", help="Whether to run on small subset for testing")
     base_args, optional = parser.parse_known_args()
 
@@ -368,24 +447,30 @@ def main():
     device = get_device(not base_args.cpu, base_args.gpu_id)
     print(f"Device: {device}")
 
-    encoder_state_dict = load_cp(
-        cp_path = base_args.cp_path,
-        cp_is_sd = base_args.cp_is_sd,
-        cp_model_type = base_args.cp_model_type,
-        cp_modular_biased = base_args.cp_modular_biased
+    if base_args.cp_path is not None:
+        encoder_state_dict = model_factory(
+            cp_path = base_args.cp_path,
+            remove_parametrizations = True,
+            debiased = (not base_args.cp_modular_biased)
+        ).encoder.state_dict()
+    else:
+        encoder_state_dict = None
+
+    train_loader, val_loader, num_labels, num_labels_protected_list, protected_key_list, protected_class_weights_list = get_data(
+        args_train = args_train,
+        use_all_attr = (base_args.prot_key_idx is None),
+        attr_idx_prot = base_args.prot_key_idx,
+        compute_class_weights = args_train.weighted_loss_protected,
+        device = device[0],
+        debug = base_args.debug
     )
 
-    if args_train.weighted_loss_protected and (base_args.modular or base_args.adv):
-        train_loader, val_loader, num_labels, num_labels_protected, protected_class_weights = get_data(
-            args_train, attr_idx = base_args.prot_key_idx, return_prot_class_weights = True, debug = base_args.debug
-        )
-        protected_class_weights = torch.tensor(protected_class_weights, device=device[0])
-    else:
-        train_loader, val_loader, num_labels, num_labels_protected = get_data(
-            args_train, attr_idx = base_args.prot_key_idx, return_prot_class_weights = False, debug = base_args.debug
-        )
-        protected_class_weights = None
-
+    loss_fn, pred_fn, metrics, loss_fn_protected_list, pred_fn_protected_list, metrics_protected_list = get_callables_wrapper(
+        num_labels = num_labels,
+        num_labels_protected = num_labels_protected_list,
+        protected_class_weights = protected_class_weights_list
+    )
+    
     train_logger = get_logger(
         baseline = base_args.baseline,
         adv = base_args.adv,
@@ -402,70 +487,125 @@ def main():
     if base_args.baseline:
         if base_args.modular:
             trainer = train_baseline_modular(
-                device, train_loader, val_loader, num_labels, num_labels_protected, protected_class_weights, train_logger, args_train, encoder_state_dict, base_args.seed
+                device,
+                train_loader,
+                val_loader,
+                num_labels,
+                num_labels_protected_list,
+                protected_key_list,
+                loss_fn,
+                pred_fn,
+                metrics,
+                loss_fn_protected_list,
+                pred_fn_protected_list,
+                metrics_protected_list,
+                train_logger,
+                args_train,
+                encoder_state_dict,
+                base_args.seed
             )
         elif base_args.adv:
             trainer = train_baseline_adv(
-                device, train_loader, val_loader, num_labels, num_labels_protected, protected_class_weights, train_logger, args_train, encoder_state_dict, base_args.seed
+                device,
+                train_loader,
+                val_loader,
+                num_labels,
+                num_labels_protected_list,
+                protected_key_list,
+                loss_fn,
+                pred_fn,
+                metrics,
+                loss_fn_protected_list,
+                pred_fn_protected_list,
+                metrics_protected_list,
+                train_logger,
+                args_train,
+                encoder_state_dict,
+                base_args.seed
             )
         else:
             trainer = train_baseline_task(
-                device, train_loader, val_loader, num_labels, train_logger, args_train, encoder_state_dict, base_args.seed
+                device,
+                train_loader,
+                val_loader,
+                num_labels,
+                loss_fn,
+                pred_fn,
+                metrics,
+                train_logger,
+                args_train,
+                encoder_state_dict,
+                base_args.seed
             )
     else:
         if base_args.modular:
             trainer = train_diff_pruning_modular(
-                device, train_loader, val_loader, num_labels, num_labels_protected, protected_class_weights, train_logger, args_train, encoder_state_dict, base_args.seed
+                device,
+                train_loader,
+                val_loader,
+                num_labels,
+                num_labels_protected_list,
+                protected_key_list,
+                loss_fn,
+                pred_fn,
+                metrics,
+                loss_fn_protected_list,
+                pred_fn_protected_list,
+                metrics_protected_list,
+                train_logger,
+                args_train,
+                encoder_state_dict,
+                base_args.seed
             )
         elif base_args.adv:
             trainer = train_diff_pruning_adv(
-                device, train_loader, val_loader, num_labels, num_labels_protected, protected_class_weights, train_logger, args_train, encoder_state_dict, base_args.seed
+                device,
+                train_loader,
+                val_loader,
+                num_labels,
+                num_labels_protected_list,
+                protected_key_list,
+                loss_fn,
+                pred_fn,
+                metrics,
+                loss_fn_protected_list,
+                pred_fn_protected_list,
+                metrics_protected_list,
+                train_logger,
+                args_train,
+                encoder_state_dict,
+                base_args.seed
             )
         else:
             trainer = train_diff_pruning_task(
-                device, train_loader, val_loader, num_labels, train_logger, args_train, encoder_state_dict, base_args.seed
+                device,
+                train_loader,
+                val_loader,
+                num_labels,
+                loss_fn,
+                pred_fn,
+                metrics,
+                train_logger,
+                args_train,
+                encoder_state_dict,
+                base_args.seed
             )
 
     if not base_args.no_adv_attack:
-        loss_fn, pred_fn, metrics = get_callables(num_labels_protected, class_weights = protected_class_weights)
-        adv_attack(
-            trainer = trainer,
-            train_loader = train_loader,
-            val_loader = val_loader,
-            logger = train_logger,
-            loss_fn = loss_fn,
-            pred_fn = pred_fn,
-            metrics = metrics,
-            num_labels = num_labels_protected,
-            adv_n_hidden = args_attack.adv_n_hidden,
-            adv_count = args_attack.adv_count,
-            adv_dropout = args_attack.adv_dropout,
-            num_epochs = args_attack.num_epochs,
-            lr = args_attack.learning_rate,
-            cooldown = args_attack.cooldown,
-            batch_size = args_attack.attack_batch_size,
-            logger_suffix = f"adv_attack{'_debiased' if (base_args.adv or base_args.modular) else ''}"
+
+        run_adv_attack(
+            base_args,
+            args_train,
+            args_attack,
+            trainer,
+            train_logger,
+            train_loader, 
+            val_loader,
+            num_labels,
+            num_labels_protected_list,
+            protected_key_list,
+            protected_class_weights_list
         )
-        if base_args.modular:
-            trainer.set_debiased(False)
-            adv_attack(
-                trainer = trainer,
-                train_loader = train_loader,
-                val_loader = val_loader,
-                logger = train_logger,
-                loss_fn = loss_fn,
-                pred_fn = pred_fn,
-                metrics = metrics,
-                num_labels = num_labels_protected,
-                adv_n_hidden = args_attack.adv_n_hidden,
-                adv_count = args_attack.adv_count,
-                adv_dropout = args_attack.adv_dropout,
-                num_epochs = args_attack.num_epochs,
-                lr = args_attack.learning_rate,
-                cooldown = args_attack.cooldown,
-                batch_size = args_attack.attack_batch_size,
-                logger_suffix = "adv_attack"
-            )
 
 
 if __name__ == "__main__":

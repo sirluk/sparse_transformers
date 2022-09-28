@@ -27,13 +27,19 @@ class ClfHead(nn.Module):
         ['tanh', nn.Tanh()]
     ])
 
-    def __init__(self, hid_sizes: Union[int, list], num_labels: int, activation: str = 'tanh', dropout: Optional[float] = None):
+    def __init__(
+        self,
+        hid_sizes: Union[int, list, tuple],
+        num_labels: int,
+        activation: str = 'tanh',
+        dropout: Optional[float] = None
+    ):
         super().__init__()
 
         if isinstance(hid_sizes, int):
             hid_sizes = [hid_sizes]
             out_sizes = [num_labels]
-        elif isinstance(hid_sizes, list):
+        elif isinstance(hid_sizes, (list, tuple)):
             if len(hid_sizes)==1:
                 out_sizes = [num_labels]
             else:
@@ -86,7 +92,7 @@ class AdvHead(nn.Module):
 
 
 class AdvHeadWrapper(nn.Module):
-    def __init__(self, adv_heads: list):
+    def __init__(self, adv_heads: Union[list, tuple]):
         super().__init__()
         self.adv_heads = nn.ModuleList(adv_heads)
 

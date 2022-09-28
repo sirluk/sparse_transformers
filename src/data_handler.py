@@ -59,12 +59,12 @@ def read_label_file(filepath):
 
 def get_data_loader(
     task_key: str,
-    protected_key: Union[str, list],
+    protected_key: Union[str, list, tuple],
     text_key: str,
     tokenizer: Tokenizer,
     data_path: Union[str, os.PathLike],
     labels_task_path: Union[str, os.PathLike],
-    labels_prot_path: Optional[Union[str, os.PathLike, list]] = None,
+    labels_prot_path: Optional[Union[str, os.PathLike, list, tuple]] = None,
     batch_size: int = 16,
     max_length: int = 256,
     shuffle: bool = True,
@@ -94,6 +94,7 @@ def get_data_loader(
 
     if isinstance(protected_key, str):
         protected_key = [protected_key]
+    if isinstance(labels_prot_path, str):
         labels_prot_path = [labels_prot_path]
 
     with open(data_path, 'rb') as file:
@@ -153,15 +154,15 @@ def get_max_length(data_paths: List[Union[str, os.PathLike]], text_key: str) -> 
 
 def get_class_weights(
     data_path: Union[str, os.PathLike],
-    label_file_path: Union[str, os.PathLike, list],
-    label_key: Union[str, list]
+    label_file_path: Union[str, os.PathLike, list, tuple],
+    label_key: Union[str, list, tuple]
 ) -> list:
     if isinstance(label_file_path, str) or isinstance(label_file_path, os.PathLike):
         assert isinstance(label_key, str), "if only one label_file_path is provided label_key needs to by string"
         label_file_path = [label_file_path]
         label_key = [label_key]
     else:
-        assert isinstance(label_key, list), "label_key needs to have same length as label_file_path"
+        assert isinstance(label_key, (list, tuple)), "label_key needs to have same length as label_file_path"
 
     with open(data_path, 'rb') as f:
         data_dicts = pickle.load(f)
@@ -177,25 +178,35 @@ def get_class_weights(
 
 def get_data(
     args_train: argparse.Namespace,
-    attr_idx: int = 0,
     use_all_attr: bool = False,
-    return_prot_class_weights: bool = False,
+    attr_idx_prot: Optional[int] = None,
+    compute_class_weights: bool = False,
+    device: Union[str, torch.device] = torch.device("cpu"),
     debug: bool = False
-) -> Tuple[DataLoader, DataLoader, int, int, list]:
+) -> Tuple[DataLoader, DataLoader, int, int, list, str]:
+
+    assert type(args_train.labels_protected_path) == type(args_train.protected_key), \
+        "labels_protected_path and protected_needs to have same type"
 
     num_labels = get_num_labels(args_train.labels_task_path)
 
-    if isinstance(args_train.labels_protected_path, list):
+    if isinstance(args_train.labels_protected_path, (list, tuple)):
         if use_all_attr:
-            num_labels_protected = [get_num_labels(x) for x in args_train.labels_protected_path]
+            labels_prot_path = args_train.labels_protected_path
         else:
-            setattr(args_train, "labels_protected_path", args_train.labels_protected_path[attr_idx])
-            num_labels_protected = [get_num_labels(args_train.labels_protected_path)]
+            labels_prot_path = [args_train.labels_protected_path[attr_idx_prot]]
     else:
-        num_labels_protected = [get_num_labels(args_train.labels_protected_path)]
+        labels_prot_path = [args_train.labels_protected_path]
+    num_labels_protected_list = [get_num_labels(x) for x in labels_prot_path]
 
-    if isinstance(args_train.protected_key, list) and not use_all_attr:
-        setattr(args_train, "protected_key", args_train.protected_key[attr_idx])
+    if isinstance(args_train.protected_key, (list, tuple)):
+        if use_all_attr:
+            key_prot_list = args_train.protected_key
+        else:
+            key_prot_list = [args_train.protected_key[attr_idx_prot]]
+    else:
+        key_prot_list = [args_train.protected_key]
+    len_key_prot = len(key_prot_list)
 
     cfg = AutoConfig.from_pretrained(args_train.model_name)
     tokenizer = AutoTokenizer.from_pretrained(args_train.model_name)
@@ -208,34 +219,36 @@ def get_data(
         length_check.append(args_train.tokenizer_max_length)
     max_length = min(length_check)
 
-    if return_prot_class_weights:
-        num_classes_protected = get_class_weights(args_train.train_pkl, args_train.labels_protected_path, args_train.protected_key)
+    if compute_class_weights:
+        num_classes_protected = get_class_weights(args_train.train_pkl, labels_prot_path, key_prot_list)
+        protected_class_weights_list = [torch.tensor(n, device=device) for n in num_classes_protected]
     else:
-        num_classes_protected = []
+        protected_class_weights_list = [None] * len_key_prot
 
     train_loader = get_data_loader(
         task_key = args_train.task_key,
-        protected_key = args_train.protected_key,
+        protected_key = key_prot_list,
         text_key = args_train.text_key,
         tokenizer = tokenizer,
         data_path = args_train.train_pkl,
         labels_task_path = args_train.labels_task_path,
-        labels_prot_path = args_train.labels_protected_path,
+        labels_prot_path = labels_prot_path,
         batch_size = args_train.batch_size,
         max_length = max_length,
         debug = debug
     )
     val_loader = get_data_loader(
         task_key = args_train.task_key,
-        protected_key = args_train.protected_key,
+        protected_key = key_prot_list,
         text_key = args_train.text_key,
         tokenizer = tokenizer,
         data_path = args_train.val_pkl,
         labels_task_path = args_train.labels_task_path,
-        labels_prot_path = args_train.labels_protected_path,
+        labels_prot_path = labels_prot_path,
         batch_size = args_train.batch_size,
         max_length = max_length,
         shuffle = False,
         debug = debug
     )
-    return train_loader, val_loader, num_labels, *num_labels_protected, *num_classes_protected
+
+    return train_loader, val_loader, num_labels, num_labels_protected_list, key_prot_list, protected_class_weights_list

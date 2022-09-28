@@ -90,30 +90,6 @@ def merge_diff_models(
     return merge_models(model_list)
 
 
-def load_cp(
-    cp_path: Union[str, Path],
-    cp_is_sd: bool,
-    cp_model_type: Union[str, BaseModel],
-    cp_modular_biased: Optional[bool] = None
-):
-    if cp_path is not None:
-        if cp_is_sd:
-            return torch.load(cp_path)
-        assert cp_model_type is not None, "if cp_path is set cp_model_type needs to be set as well"
-        if isinstance(cp_model_type, str):
-            model_class = eval(cp_model_type)
-        else:
-            model_class = cp_model_type
-        kwargs = {"filepath": cp_path}
-        if isinstance(model_class, BasePruningModel):
-            kwargs["remove_parametrizations"] = True
-            if isinstance(model_class, ModularDiffModel):
-                assert cp_modular_biased is not None, "if model type is Modular, cp_modular_debiased needs to be set"
-                kwargs["debiased"] = not cp_modular_biased
-        m = model_class.load_checkpoint(**kwargs)
-        return m.encoder.state_dict()
-
-
 @torch.no_grad()
 def generate_embeddings(
     model: torch.nn.Module,
@@ -224,7 +200,7 @@ def model_factory(
     info_dict = torch.load(cp_path, map_location=map_location)
     model_cls = eval(info_dict["cls_name"])
     assert model_cls in AVAILABLE_MODEL_CLASSES, \
-        f"Model Class {model_cls} is not in available model classes\n{'\n'.join(AVAILABLE_MODEL_CLASSES)}"
+        f"Model Class {model_cls} is not in available model classes: {', '.join(AVAILABLE_MODEL_CLASSES)}"
     load_cp_args = model_cls.load_checkpoint.__code__.co_varnames
     model_cls_kwargs = {k:v for k,v in kwargs.items() if k in load_cp_args}
     return model_cls.load_checkpoint(cp_path, map_location=map_location, **model_cls_kwargs)

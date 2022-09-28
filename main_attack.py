@@ -10,7 +10,7 @@ from src.models.model_adv import AdvModel
 from src.models.model_task import TaskModel
 from src.models.model_modular import ModularModel
 from src.training_logger import TrainLogger
-from src.adv_attack import adv_attack
+from src.adv_attack import run_adv_attack
 from src.data_handler import get_data
 from src.utils import (
     get_device,
@@ -23,13 +23,22 @@ from src.utils import (
 torch.manual_seed(0)
 
 
+### DEFINE MANUALLY
+CP_DIR = "/share/home/lukash/pan16/bertl4/cp/"
+# CP = "task-baseline-bert_uncased_L-4_H-256_A-4-64-2e-05-seed4.pt"
+CP = "task-diff_pruning_0.05-bert_uncased_L-4_H-256_A-4-64-2e-05-seed4.pt"
+MODEL_CLS = TaskDiffModel
+### DEFINE MANUALLY
+
+
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument("--debug", type=bool, default=False, help="Whether to run on small subset for testing")
+    parser.add_argument("--debug", action="store_true", help="Whether to run on small subset for testing")
     parser.add_argument("--gpu_id", nargs="*", type=int, default=[0], help="")
     parser.add_argument("--seed", type=int, default=0, help="torch random seed")
     parser.add_argument("--ds", type=str, default="bios", help="dataset")
-    parser.add_argument("--cpu", type=bool, default=False, help="Run on cpu")
+    parser.add_argument("--cpu", action="store_true", help="Run on cpu")
+    parser.add_argument("--no_weighted_loss", action="store_true", help="do not use weighted loss for protected attribute")
     base_args, optional = parser.parse_known_args()
 
     with open("cfg.yml", "r") as f:
@@ -49,58 +58,46 @@ def main():
     device = get_device(not base_args.cpu, base_args.gpu_id)
     print(f"Device: {device}")
 
-    train_loader, eval_loader, num_labels, num_labels_protected = get_data(args_train, debug=base_args.debug)
+    train_loader, val_loader, num_labels, num_labels_protected, protected_key, protected_class_weights = get_data(
+        args_train = args_train,
+        use_all_attr = True,
+        compute_class_weights = (not base_args.no_weighted_loss),
+        device = device[0],
+        debug = base_args.debug
+    )
 
-    ### DEFINE MANUALLY
-    # cp_dir = "/share/home/lukash/checkpoints_bert_L4/seed4"
-    cp_dir = "checkpoints_bios"
-    # cp = "bert_uncased_L-4_H-256_A-4-fixmask0.1-modular-sparse_task-merged_head.pt"
-    # cp = "bert_uncased_L-4_H-256_A-4-fixmask0.05-modular-sparse_task.pt"
-    # cp = "bert_uncased_L-4_H-256_A-4-fixmask0.05-modular.pt"
-    cp = "bert_uncased_L-4_H-256_A-4-modular_baseline-seed0.pt"
-    # cp = "bert_uncased_L-4_H-256_A-4-task_baseline.pt"
-    # cp = "bert_uncased_L-4_H-256_A-4-fixmask0.05-task.pt"
-    # cp = "bert_uncased_L-4_H-256_A-4-fixmask0.1-adv.pt"
-    # cp = "bert_uncased_L-4_H-256_A-4-fixmask0.1-modular.pt"
-    model_cls = ModularModel
-    ### DEFINE MANUALLY
-
-    trainer = model_cls.load_checkpoint(f"{cp_dir}/{cp}", remove_parametrizations=True, debiased=True)
+    trainer = MODEL_CLS.load_checkpoint(f"{CP_DIR}/{CP}", remove_parametrizations=True)
     trainer.to(device)
 
-    logger_name = "-".join([
-        f"only_adv_attack_{cp[:-3]}",
+    logger_name = "-".join([x for x in [
+        f"only_adv_attack_{CP[:-3]}",
         str(args_train.batch_size),
         str(args_train.learning_rate),
+        "weighted_loss_prot" if not base_args.no_weighted_loss else None,
         f"seed{base_args.seed}"
-    ])
+    ] if x is not None])
     train_logger = TrainLogger(
         log_dir = Path(args_train.log_dir),
         logger_name = logger_name,
         logging_step = args_train.logging_step
     )
 
-    loss_fn_protected, pred_fn_protected, metrics_protected = get_callables(num_labels_protected)
+    print(f"running model {CP}")
 
-    print(f"running model {cp}")
-
-    adv_attack(
+    run_adv_attack(
+        base_args = base_args,
+        args_train = args_train,
+        args_train = args_train,
         trainer = trainer,
+        train_logger = train_logger,
         train_loader = train_loader,
-        val_loader = eval_loader,
-        logger = train_logger,
-        loss_fn = loss_fn_protected,
-        pred_fn = pred_fn_protected,
-        metrics = metrics_protected,
-        num_labels = num_labels_protected,
-        adv_n_hidden = args_train.adv_n_hidden,
-        adv_count = args_train.adv_count,
-        adv_dropout = args_train.adv_dropout,
-        num_epochs = args_train.num_epochs,
-        lr = args_train.learning_rate,
-        cooldown = args_train.cooldown,
-        batch_size = args_train.attack_batch_size
+        val_loader = val_loader,
+        num_labels = num_labels,
+        num_labels_protected = num_labels_protected,
+        protected_key = protected_key,
+        protected_class_weights = protected_class_weights
     )
+    
 
 if __name__ == "__main__":
 

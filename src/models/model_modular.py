@@ -22,7 +22,7 @@ class ModularModel(BaseModel):
         self,
         model_name: str,
         num_labels_task: int,
-        num_labels_protected: int,
+        num_labels_protected: Union[int, list, tuple],
         task_dropout: float = .3,
         task_n_hidden: int = 0,
         adv_dropout: float = .3,
@@ -35,6 +35,9 @@ class ModularModel(BaseModel):
         **kwargs
     ):
         super().__init__(model_name, **kwargs)
+
+        if isinstance(num_labels_protected, int):
+            num_labels_protected = [num_labels_protected]
 
         self.num_labels_task = num_labels_task
         self.num_labels_protected = num_labels_protected
@@ -58,7 +61,12 @@ class ModularModel(BaseModel):
 
         # heads
         self.task_head = SwitchHead(adv_task_head, ClfHead, [self.in_size_heads]*(task_n_hidden+1), num_labels_task, dropout=task_dropout)
-        self.adv_head = AdvHead(adv_count, hid_sizes=[self.in_size_heads]*(adv_n_hidden+1), num_labels=num_labels_protected, dropout=adv_dropout)
+
+        self.adv_head = torch.nn.ModuleList()
+        for n in num_labels_protected:
+            self.adv_head.append(
+                AdvHead(adv_count, hid_sizes=[self.in_size_heads]*(adv_n_hidden+1), num_labels=n, dropout=adv_dropout)
+            )
 
         # separate encoders
         self.encoder_biased = self.encoder
@@ -73,8 +81,8 @@ class ModularModel(BaseModel):
     def forward(self, **x) -> torch.Tensor:
         return self.task_head(self._forward(**x))
 
-    def forward_protected(self, **x) -> torch.Tensor:
-        return self.adv_head(self._forward(**x))
+    def forward_protected(self, head_idx=0, **x) -> torch.Tensor:
+        return self.adv_head[head_idx](self._forward(**x))
 
     def fit(
         self,
@@ -84,9 +92,9 @@ class ModularModel(BaseModel):
         loss_fn: Callable,
         pred_fn: Callable,
         metrics: Dict[str, Callable],
-        loss_fn_protected: Callable,
-        pred_fn_protected: Callable,
-        metrics_protected: Dict[str, Callable],
+        loss_fn_protected: Union[Callable, list, tuple],
+        pred_fn_protected: Union[Callable, list, tuple],
+        metrics_protected: Union[Dict[str, Callable], list, tuple],
         num_epochs_warmup: int,
         num_epochs: int,
         adv_lambda: float,
@@ -97,9 +105,19 @@ class ModularModel(BaseModel):
         optimizer_warmup_steps: int,
         max_grad_norm: float,
         output_dir: Union[str, os.PathLike],
+        protected_key: Optional[Union[str, list, tuple]] = None,
         checkpoint_name: Optional[str] = None,
         seed: Optional[int] = None
     ) -> None:
+
+        if not isinstance(loss_fn_protected, (list, tuple)):
+            loss_fn_protected = [loss_fn_protected]
+        if not isinstance(pred_fn_protected, (list, tuple)):
+            pred_fn_protected = [pred_fn_protected]
+        if not isinstance(metrics_protected, (list, tuple)):
+            metrics_protected = [metrics_protected]
+        if not isinstance(protected_key, (list, tuple)):
+            protected_key = [protected_key]
 
         self.global_step = 0
         num_epochs_total = num_epochs + num_epochs_warmup
@@ -152,21 +170,30 @@ class ModularModel(BaseModel):
             )
             logger.validation_loss(epoch, result_debiased, suffix="task_debiased")
 
-            result_protected = self.evaluate(
-                val_loader,
-                loss_fn_protected,
-                pred_fn_protected,
-                metrics_protected,
-                predict_prot=True,
-                debiased=True
-            )
-            logger.validation_loss(epoch, result_protected, suffix="protected")
+            results_protected = []
+            for i, (prot_key, loss_fn_prot, pred_fn_prot, metrics_prot) in enumerate(zip(
+                protected_key, loss_fn_protected, pred_fn_protected, metrics_protected
+            )):
+                k = str(prot_key if prot_key is not None else i)
+                res_prot = self.evaluate(
+                    val_loader,
+                    loss_fn_prot,
+                    pred_fn_prot,
+                    metrics_prot,
+                    label_idx=i+2,
+                    debiased=True
+                )
+                results_protected.append((k, res_prot))
+                logger.validation_loss(epoch, res_prot, suffix=f"protected_{k}")
 
-            result_str = ", " + ", ".join([
+            result_strings = [
                 str_suffix(result, "_task"),
-                str_suffix(result_debiased, "_task_debiased"),
-                str_suffix(result_protected, "_protected")
-            ])
+                str_suffix(result_debiased, "_task_debiased")
+            ]
+            for (k, r) in results_protected:
+                result_strings.append(str_suffix(r, f"_protected_{k}"))
+            result_str = ", ".join(result_strings)
+
             train_iterator.set_description(
                 train_str.format(epoch, result_str), refresh=True
             )
@@ -188,18 +215,16 @@ class ModularModel(BaseModel):
         loss_fn: Callable,
         pred_fn: Callable,
         metrics: Dict[str, Callable],
-        predict_prot: bool = False,
+        label_idx: int = 1,
         debiased: bool = False
     ) -> dict:
         self.eval()
 
-        if predict_prot:
-            desc = "protected attribute"
-            label_idx = 2
-            forward_fn = lambda x: self.forward_protected(**x)
+        if label_idx > 1:
+            desc = f"protected attribute {label_idx-2}"
+            forward_fn = lambda x: self.forward_protected(head_idx=label_idx-2, **x)
         else:
             desc = "task"
-            label_idx = 1
             forward_fn = lambda x: self(**x)
 
         if debiased != self._debiased:
@@ -218,7 +243,7 @@ class ModularModel(BaseModel):
         loss_fn: Callable,
         logger: TrainLogger,
         max_grad_norm: float,
-        loss_fn_protected: Callable,
+        loss_fn_protected: Union[Callable, list, tuple],
         adv_lambda: float
     ) -> None:
         self.train()
@@ -227,7 +252,8 @@ class ModularModel(BaseModel):
         epoch_iterator = tqdm(train_loader, desc=epoch_str.format(0, math.nan, math.nan), leave=False, position=1)
         for step, batch in enumerate(epoch_iterator):
 
-            inputs, labels_task, labels_protected = batch
+            inputs, labels_task = batch[:2]
+            labels_protected = batch[2:]
             inputs = dict_to_device(inputs, self.device)
 
             ##################################################
@@ -258,9 +284,10 @@ class ModularModel(BaseModel):
             loss_task_adv = loss_fn(outputs_task, labels_task.to(self.device))
             loss_debiased += loss_task_adv
 
-            outputs_protected = self.adv_head.forward_reverse(hidden, lmbda=adv_lambda)
-            loss_protected = self._get_mean_loss(outputs_protected, labels_protected.to(self.device), loss_fn_protected)
-            loss_debiased += loss_protected
+            for i, (l, loss_fn_prot) in enumerate(zip(labels_protected, loss_fn_protected)):
+                outputs_protected = self.adv_head[i].forward_reverse(hidden, lmbda = adv_lambda)
+                loss_protected = self._get_mean_loss(outputs_protected, l.to(self.device), loss_fn_prot)
+                loss_debiased += loss_protected
 
             loss_debiased.backward()
 

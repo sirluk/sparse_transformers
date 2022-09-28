@@ -21,7 +21,7 @@ class AdvModel(BaseModel):
         self,
         model_name: str,
         num_labels_task: int,
-        num_labels_protected: int,
+        num_labels_protected: Union[int, list, tuple],
         task_dropout: float = .3,
         task_n_hidden: int = 0,
         adv_dropout: float = .3,
@@ -33,6 +33,9 @@ class AdvModel(BaseModel):
         **kwargs
     ):
         super().__init__(model_name, **kwargs)
+
+        if isinstance(num_labels_protected, int):
+            num_labels_protected = [num_labels_protected]
 
         self.num_labels_task = num_labels_task
         self.num_labels_protected = num_labels_protected
@@ -55,7 +58,12 @@ class AdvModel(BaseModel):
 
         # heads
         self.task_head = ClfHead([self.in_size_heads]*(task_n_hidden+1), num_labels_task, dropout=task_dropout)
-        self.adv_head = AdvHead(adv_count, hid_sizes=[self.in_size_heads]*(adv_n_hidden+1), num_labels=num_labels_protected, dropout=adv_dropout)
+
+        self.adv_head = torch.nn.ModuleList()
+        for n in num_labels_protected:
+            self.adv_head.append(
+                AdvHead(adv_count, hid_sizes=[self.in_size_heads]*(adv_n_hidden+1), num_labels=n, dropout=adv_dropout)
+            )
 
     def _forward(self, **x) -> torch.Tensor:
         hidden = super()._forward(**x)
@@ -64,8 +72,8 @@ class AdvModel(BaseModel):
     def forward(self, **x) -> torch.Tensor:
         return self.task_head(self._forward(**x))
 
-    def forward_protected(self, **x) -> torch.Tensor:
-        return self.adv_head(self._forward(**x))
+    def forward_protected(self, head_idx=0, **x) -> torch.Tensor:
+        return self.adv_head[head_idx](self._forward(**x))
 
     def fit(
         self,
@@ -75,9 +83,9 @@ class AdvModel(BaseModel):
         loss_fn: Callable,
         pred_fn: Callable,
         metrics: Dict[str, Callable],
-        loss_fn_protected: Callable,
-        pred_fn_protected: Callable,
-        metrics_protected: Dict[str, Callable],
+        loss_fn_protected: Union[Callable, list, tuple],
+        pred_fn_protected: Union[Callable, list, tuple],
+        metrics_protected: Union[Dict[str, Callable], list, tuple],
         num_epochs: int,
         num_epochs_warmup: int,
         adv_lambda: float,
@@ -88,9 +96,19 @@ class AdvModel(BaseModel):
         optimizer_warmup_steps: int,
         max_grad_norm: float,
         output_dir: Union[str, os.PathLike],
+        protected_key: Optional[Union[str, list, tuple]] = None,
         checkpoint_name: Optional[str] = None,
         seed: Optional[int] = None
     ) -> None:
+
+        if not isinstance(loss_fn_protected, (list, tuple)):
+            loss_fn_protected = [loss_fn_protected]
+        if not isinstance(pred_fn_protected, (list, tuple)):
+            pred_fn_protected = [pred_fn_protected]
+        if not isinstance(metrics_protected, (list, tuple)):
+            metrics_protected = [metrics_protected]
+        if not isinstance(protected_key, (list, tuple)):
+            protected_key = [protected_key]
 
         self.global_step = 0
         num_epochs_total = num_epochs + num_epochs_warmup
@@ -107,7 +125,7 @@ class AdvModel(BaseModel):
 
         self.zero_grad()
 
-        train_str = "Epoch {}, {}, {}"
+        train_str = "Epoch {}, {}"
         str_suffix = lambda d, suffix="": ", ".join([f"{k}{suffix}: {v}" for k,v in d.items()])
 
         train_iterator = trange(num_epochs_total, desc=train_str.format(0, "", ""), leave=False, position=0)
@@ -135,24 +153,31 @@ class AdvModel(BaseModel):
             )
             logger.validation_loss(epoch, result, suffix="task_debiased")
 
-            result_protected = self.evaluate(
-                val_loader,
-                loss_fn_protected,
-                pred_fn_protected,
-                metrics_protected,
-                predict_prot=True
-            )
-            logger.validation_loss(epoch, result_protected, suffix="protected")
+            results_protected = []
+            for i, (prot_key, loss_fn_prot, pred_fn_prot, metrics_prot) in enumerate(zip(
+                protected_key, loss_fn_protected, pred_fn_protected, metrics_protected
+            )):
+                k = str(prot_key if prot_key is not None else i)
+                res_prot = self.evaluate(
+                    val_loader,
+                    loss_fn_prot,
+                    pred_fn_prot,
+                    metrics_prot,
+                    label_idx=i+2
+                )
+                results_protected.append((k, res_prot))
+                logger.validation_loss(epoch, res_prot, suffix=f"protected_{k}")
 
-            result_str = train_str.format(
-                epoch, str_suffix(result, "_task"), str_suffix(result_protected, "_protected")
-            )
+            result_strings = [str_suffix(result, "_task_debiased")]
+            for (k, r) in results_protected:
+                result_strings.append(str_suffix(r, f"_protected_{k}"))
+            result_str = ", ".join(result_strings)
 
-            train_iterator.set_description(result_str, refresh=True)
+            train_iterator.set_description(train_str.format(epoch, result_str), refresh=True)
 
             cpt = self.save_checkpoint(Path(output_dir), checkpoint_name, seed)
 
-        print("Final result after " + result_str)
+        print("Final result after " + train_str.format(epoch, result_str))
 
         return cpt
 
@@ -164,17 +189,15 @@ class AdvModel(BaseModel):
         loss_fn: Callable,
         pred_fn: Callable,
         metrics: Dict[str, Callable],
-        predict_prot: bool = False
+        label_idx: int = 1
     ) -> dict:
         self.eval()
 
-        if predict_prot:
-            desc = "protected attribute"
-            label_idx = 2
-            forward_fn = lambda x: self.forward_protected(**x)
+        if label_idx > 1:
+            desc = f"protected attribute {label_idx-2}"
+            forward_fn = lambda x: self.forward_protected(head_idx=label_idx-2, **x)
         else:
             desc = "task"
-            label_idx = 1
             forward_fn = lambda x: self(**x)
 
         return self._evaluate(val_loader, forward_fn, loss_fn, pred_fn, metrics, label_idx, desc)
@@ -186,7 +209,7 @@ class AdvModel(BaseModel):
         loss_fn: Callable,
         logger: TrainLogger,
         max_grad_norm: float,
-        loss_fn_protected: Callable,
+        loss_fn_protected: Union[Callable, list, tuple],
         adv_lambda: float
     ) -> None:
         self.train()
@@ -197,16 +220,18 @@ class AdvModel(BaseModel):
 
             loss = 0.
 
-            inputs, labels_task, labels_protected = batch
+            inputs, labels_task = batch[:2]
+            labels_protected = batch[2:]
             inputs = dict_to_device(inputs, self.device)
             hidden = self._forward(**inputs)
             outputs_task = self.task_head(hidden)
             loss_task = loss_fn(outputs_task, labels_task.to(self.device))
             loss += loss_task
 
-            outputs_protected = self.adv_head.forward_reverse(hidden, lmbda = adv_lambda)
-            loss_protected = self._get_mean_loss(outputs_protected, labels_protected.to(self.device), loss_fn_protected)
-            loss += loss_protected
+            for i, (l, loss_fn_prot) in enumerate(zip(labels_protected, loss_fn_protected)):
+                outputs_protected = self.adv_head[i].forward_reverse(hidden, lmbda = adv_lambda)
+                loss_protected = self._get_mean_loss(outputs_protected, l.to(self.device), loss_fn_prot)
+                loss += loss_protected
 
             loss.backward()
 

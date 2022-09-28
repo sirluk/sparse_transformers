@@ -69,7 +69,7 @@ class TaskDiffModel(BasePruningModel):
         concrete_lower: float,
         concrete_upper: float,
         structured_diff_pruning: bool,
-        sparsity_pen: Union[float,list],
+        sparsity_pen: Union[float, list, tuple],
         learning_rate: float,
         learning_rate_bottleneck: float,
         learning_rate_head: float,
@@ -219,7 +219,7 @@ class TaskDiffModel(BasePruningModel):
         epoch_iterator = tqdm(train_loader, desc=epoch_str.format(0, math.nan, math.nan), leave=False, position=1)
         for step, batch in enumerate(epoch_iterator):
 
-            inputs, labels, _ = batch
+            inputs, labels = batch[0], batch[1]
             inputs = dict_to_device(inputs, self.device)
 
             concrete_samples = concrete_samples if self.finetune_state else 1
