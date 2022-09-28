@@ -346,32 +346,35 @@ class BasePruningModel(BaseModel):
             self.model_state = ModelState.FINETUNING
 
 
-    def _activate_parametrizations(self, active: bool, idx: int):
-        for base_module in self.get_encoder_base_modules():
-            try:
-                for par_list in base_module.parametrizations.values():
-                    try:
-                        par_list[idx].active = active
-                    except IndexError:
-                        pass
-            except AttributeError:
-                pass
-
-
-    def _freeze_parametrizations(self, frozen: bool, idx: Optional[int] = None):
+    def _parametrizations_fn(self, fn: Callable, idx: Optional[int] = None):
         for base_module in self.get_encoder_base_modules():
             try:
                 for par_list in base_module.parametrizations.values():
                     if idx is not None:
                         try:
-                            par_list[idx].set_frozen(frozen)
+                            fn(par_list[idx])
                         except IndexError:
                             pass
                     else:
                         for par in par_list:
-                            par.set_frozen(frozen)
+                            fn(par)
             except AttributeError:
                 pass
+
+
+    def _parametrizations_set_attr(self, attr: str, v, idx: Optional[int] = None):
+        fn = lambda x: setattr(x, attr, v)
+        self._parametrizations_fn(fn, idx)
+
+
+    def _activate_parametrizations(self, active: bool, idx: int):
+        fn = lambda x: setattr(x, "active", active)
+        self._parametrizations_fn(fn, idx)
+
+
+    def _freeze_parametrizations(self, frozen: bool, idx: Optional[int] = None):
+        fn = lambda x: x.set_frozen(frozen)
+        self._parametrizations_fn(fn, idx)
 
 
     def _freeze_original_parameters(self, frozen: bool):

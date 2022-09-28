@@ -26,6 +26,12 @@ class TaskDiffModel(BasePruningModel):
         bottleneck: bool = False,
         bottleneck_dim: Optional[int] = None,
         bottleneck_dropout: Optional[float] = None,
+        fixmask_init: bool = False,
+        concrete_lower: Optional[float] = -1.5,
+        concrete_upper: Optional[float] = 1.5,
+        structured_diff_pruning: Optional[bool] = True,
+        alpha_init: Optional[Union[int, float]] = 5,
+        sparsity_pen: Optional[Union[float, list, tuple]] = 1.25e-7,
         **kwargs
     ):
         super().__init__(model_name, **kwargs)
@@ -36,6 +42,9 @@ class TaskDiffModel(BasePruningModel):
         self.has_bottleneck = bottleneck
         self.bottleneck_dim = bottleneck_dim
         self.bottleneck_dropout = bottleneck_dropout
+        self.concrete_lower = concrete_lower
+        self.concrete_upper = concrete_upper
+        self.structured_diff_pruning = structured_diff_pruning
 
         # bottleneck layer
         if self.has_bottleneck:
@@ -46,6 +55,18 @@ class TaskDiffModel(BasePruningModel):
             self.in_size_heads = self.hidden_size
 
         self.task_head = ClfHead([self.in_size_heads]*(n_hidden+1), num_labels, dropout=dropout)
+
+        self._add_diff_parametrizations(
+            n_parametrizations = 1,
+            p_requires_grad = False,
+            fixmask_init = fixmask_init,
+            alpha_init = alpha_init,
+            concrete_lower = concrete_lower,
+            concrete_upper = concrete_upper,
+            structured = structured_diff_pruning
+        )
+
+        self._init_sparsity_pen(sparsity_pen)
 
     def _forward(self, **x) -> torch.Tensor:
         hidden = super()._forward(**x)
@@ -64,12 +85,7 @@ class TaskDiffModel(BasePruningModel):
         metrics: Dict[str, Callable],
         num_epochs_finetune: int,
         num_epochs_fixmask: int,
-        alpha_init: Union[int, float],
         concrete_samples: int,
-        concrete_lower: float,
-        concrete_upper: float,
-        structured_diff_pruning: bool,
-        sparsity_pen: Union[float, list, tuple],
         learning_rate: float,
         learning_rate_bottleneck: float,
         learning_rate_head: float,
@@ -79,31 +95,37 @@ class TaskDiffModel(BasePruningModel):
         max_grad_norm: float,
         output_dir: Union[str, os.PathLike],
         cooldown: int,
+        concrete_lower: Optional[float] = None,
+        concrete_upper: Optional[float] = None,
+        structured_diff_pruning: Optional[bool] = None,
+        sparsity_pen: Optional[Union[float, list, tuple]] = None,
         fixmask_pct: Optional[float] = None,
         checkpoint_name: Optional[str] = None,
         seed: Optional[int] = None
     ) -> None:
+
+        assert self.finetune_state or (self.fixmask_state and num_epochs_finetune==0), \
+            "model is in fixmask state but num_epochs_fintune>0"
 
         self.global_step = 0
         num_epochs_total = num_epochs_finetune + num_epochs_fixmask
         train_steps_finetune = len(train_loader) * num_epochs_finetune
         train_steps_fixmask = len(train_loader) * num_epochs_fixmask
 
-        log_ratio = self.get_log_ratio(concrete_lower, concrete_upper)
+        par_attr = {
+            "concrete_lower": concrete_lower,
+            "concrete_upper": concrete_upper,
+            "structured_diff_pruning": structured_diff_pruning
+        }
+        for s, v in par_attr.items():
+            if v is not None:
+                setattr(self, s, v)
+                self._parametrizations_set_attr(s, v)
 
-        self._init_sparsity_pen(sparsity_pen)
+        if sparsity_pen is not None:
+            self._init_sparsity_pen(sparsity_pen)
 
-        if not self.parametrized:
-            self._add_diff_parametrizations(
-                n_parametrizations = 1,
-                p_requires_grad = False,
-                alpha_init = alpha_init,
-                concrete_lower = concrete_lower,
-                concrete_upper = concrete_upper,
-                structured = structured_diff_pruning
-            )
-        else:
-            assert self.finetune_state or (self.fixmask_state and num_epochs_finetune==0), "model is in fixmask state but num_epochs_fintune>0"
+        log_ratio = self.get_log_ratio(self.concrete_lower, self.concrete_upper)       
 
         self._init_optimizer_and_schedule(
             train_steps_finetune,
@@ -166,9 +188,6 @@ class TaskDiffModel(BasePruningModel):
                 if logger.is_best(result["loss"], ascending=True):
                     cpt = self.save_checkpoint(
                         Path(output_dir),
-                        concrete_lower,
-                        concrete_upper,
-                        structured_diff_pruning,
                         checkpoint_name,
                         seed
                     )
@@ -311,9 +330,6 @@ class TaskDiffModel(BasePruningModel):
     def save_checkpoint(
         self,
         output_dir: Union[str, os.PathLike],
-        concrete_lower: float,
-        concrete_upper: float,
-        structured_diff_pruning: bool,
         checkpoint_name: Optional[str] = None,
         seed: Optional[int] = None
     ) -> None:
@@ -330,9 +346,10 @@ class TaskDiffModel(BasePruningModel):
             "encoder_state_dict": self.encoder_module.state_dict(),
             "bottleneck_state_dict": self.bottleneck.state_dict(),
             "task_head_state_dict": self.task_head.state_dict(),
-            "concrete_lower": concrete_lower,
-            "concrete_upper": concrete_upper,
-            "structured_diff_pruning": structured_diff_pruning
+            "concrete_lower": self.concrete_lower,
+            "concrete_upper": self.concrete_upper,
+            "structured_diff_pruning": self.structured_diff_pruning,
+            "sparsity_pen": self.sparsity_pen
         }
 
         output_dir = Path(output_dir)
@@ -355,23 +372,19 @@ class TaskDiffModel(BasePruningModel):
         info_dict = torch.load(filepath, map_location=map_location)
 
         cls_instance = cls(
-            info_dict['model_name'],
-            info_dict['num_labels'],
-            info_dict['dropout'],
-            info_dict['n_hidden'],
-            info_dict['bottleneck'],
-            info_dict['bottleneck_dim'],
-            info_dict['bottleneck_dropout']
-        )
-
-        cls_instance._add_diff_parametrizations(
-            n_parametrizations = 1,
-            p_requires_grad = False,
-            fixmask_init = info_dict["fixmask"],
-            alpha_init = 5, # standard value for alpha init, not important here as it will be overwritten by checkpoint
+            model_name = info_dict['model_name'],
+            num_labels = info_dict['num_labels'],
+            dropout = info_dict['dropout'],
+            n_hidden = info_dict['n_hidden'],
+            bottleneck = info_dict['bottleneck'],
+            bottleneck_dim = info_dict['bottleneck_dim'],
+            bottleneck_dropout = info_dict['bottleneck_dropout'],
+            fixmask_init = info_dict['fixmask'],
             concrete_lower = info_dict['concrete_lower'],
             concrete_upper = info_dict['concrete_upper'],
-            structured = info_dict['structured_diff_pruning']
+            structured_diff_pruning = info_dict['structured_diff_pruning'],
+            alpha_init = 5,
+            sparsity_pen = info_dict['sparsity_pen']
         )
 
         cls_instance.encoder.load_state_dict(info_dict['encoder_state_dict'])

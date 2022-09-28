@@ -72,6 +72,8 @@ class ModularModel(BaseModel):
         self.encoder_biased = self.encoder
         self.encoder_debiased = copy.deepcopy(self.encoder_biased)
 
+        self.set_debiased(False)
+
 
     def _forward(self, **x) -> torch.Tensor:
         hidden = super()._forward(**x)
@@ -121,8 +123,6 @@ class ModularModel(BaseModel):
         self.global_step = 0
         num_epochs_total = num_epochs + num_epochs_warmup
         train_steps = len(train_loader) * num_epochs_total
-
-        self.set_debiased(False)
 
         self._init_optimizer_and_schedule(
             train_steps,

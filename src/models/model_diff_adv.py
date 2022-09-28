@@ -30,6 +30,12 @@ class AdvDiffModel(BasePruningModel):
         bottleneck: bool = False,
         bottleneck_dim: Optional[int] = None,
         bottleneck_dropout: Optional[float] = None,
+        fixmask_init: bool = False,
+        concrete_lower: Optional[float] = -1.5,
+        concrete_upper: Optional[float] = 1.5,
+        structured_diff_pruning: Optional[bool] = True,
+        alpha_init: Optional[Union[int, float]] = 5,
+        sparsity_pen: Optional[Union[float, list, tuple]] = 1.25e-7,
         **kwargs
     ):
         super().__init__(model_name, **kwargs)
@@ -47,6 +53,9 @@ class AdvDiffModel(BasePruningModel):
         self.has_bottleneck = bottleneck
         self.bottleneck_dim = bottleneck_dim
         self.bottleneck_dropout = bottleneck_dropout
+        self.concrete_lower = concrete_lower
+        self.concrete_upper = concrete_upper
+        self.structured_diff_pruning = structured_diff_pruning
 
         # bottleneck layer
         if self.has_bottleneck:
@@ -64,6 +73,18 @@ class AdvDiffModel(BasePruningModel):
             self.adv_head.append(
                 AdvHead(adv_count, hid_sizes=[self.in_size_heads]*(adv_n_hidden+1), num_labels=n, dropout=adv_dropout)
             )
+
+        self._add_diff_parametrizations(
+            n_parametrizations = 1,
+            p_requires_grad = False,
+            fixmask_init = fixmask_init,
+            alpha_init = alpha_init,
+            concrete_lower = concrete_lower,
+            concrete_upper = concrete_upper,
+            structured = structured_diff_pruning
+        )
+
+        self._init_sparsity_pen(sparsity_pen)
 
     def _forward(self, **x) -> torch.Tensor:
         hidden = super()._forward(**x)
@@ -89,13 +110,8 @@ class AdvDiffModel(BasePruningModel):
         num_epochs_warmup: int,
         num_epochs_finetune: int,
         num_epochs_fixmask: int,
-        alpha_init: Union[int, float],
         concrete_samples: int,
-        concrete_lower: float,
-        concrete_upper: float,
-        structured_diff_pruning: bool,
         adv_lambda: float,
-        sparsity_pen: Union[float, list, tuple],
         learning_rate: float,
         learning_rate_bottleneck: float,
         learning_rate_task_head: float,
@@ -105,11 +121,18 @@ class AdvDiffModel(BasePruningModel):
         weight_decay: float,
         max_grad_norm: float,
         output_dir: Union[str, os.PathLike],
+        concrete_lower: Optional[float] = None,
+        concrete_upper: Optional[float] = None,
+        structured_diff_pruning: Optional[bool] = None,
+        sparsity_pen: Optional[Union[float, list, tuple]] = None,
         fixmask_pct: Optional[float] = None,
         protected_key: Optional[Union[str, list, tuple]] = None,
         checkpoint_name: Optional[str] = None,
         seed: Optional[int] = None
     ) -> None:
+
+        assert self.finetune_state or (self.fixmask_state and num_epochs_finetune==0), \
+            "model is in fixmask state but num_epochs_fintune>0"
 
         if not isinstance(loss_fn_protected, (list, tuple)):
             loss_fn_protected = [loss_fn_protected]
@@ -126,21 +149,20 @@ class AdvDiffModel(BasePruningModel):
         train_steps_finetune = len(train_loader) * num_epochs_finetune
         train_steps_fixmask = len(train_loader) * num_epochs_fixmask
 
-        log_ratio = self.get_log_ratio(concrete_lower, concrete_upper)
+        par_attr = {
+            "concrete_lower": concrete_lower,
+            "concrete_upper": concrete_upper,
+            "structured_diff_pruning": structured_diff_pruning
+        }
+        for s, v in par_attr.items():
+            if v is not None:
+                setattr(self, s, v)
+                self._parametrizations_set_attr(s, v)
 
-        self._init_sparsity_pen(sparsity_pen)
+        if sparsity_pen is not None:
+            self._init_sparsity_pen(sparsity_pen)
 
-        if not self.parametrized:
-            self._add_diff_parametrizations(
-                n_parametrizations = 1,
-                p_requires_grad = False,
-                alpha_init = alpha_init,
-                concrete_lower = concrete_lower,
-                concrete_upper = concrete_upper,
-                structured = structured_diff_pruning
-            )
-        else:
-            assert self.finetune_state or (self.fixmask_state and num_epochs_finetune==0), "model is in fixmask state but num_epochs_fintune>0"
+        log_ratio = self.get_log_ratio(self.concrete_lower, self.concrete_upper)
 
         self._init_optimizer_and_schedule(
             train_steps_finetune,
@@ -229,9 +251,6 @@ class AdvDiffModel(BasePruningModel):
             if self.fixmask_state or ((num_epochs_fixmask == 0) and (epoch >= num_epochs_warmup)):
                 cpt = self.save_checkpoint(
                     Path(output_dir),
-                    concrete_lower,
-                    concrete_upper,
-                    structured_diff_pruning,
                     checkpoint_name,
                     seed
                 )
@@ -386,9 +405,6 @@ class AdvDiffModel(BasePruningModel):
     def save_checkpoint(
         self,
         output_dir: Union[str, os.PathLike],
-        concrete_lower: float,
-        concrete_upper: float,
-        structured_diff_pruning: bool,
         checkpoint_name: Optional[str] = None,
         seed: Optional[None] = None
     ) -> None:
@@ -410,9 +426,10 @@ class AdvDiffModel(BasePruningModel):
             "bottleneck_state_dict": self.bottleneck.state_dict(),
             "task_head_state_dict": self.task_head.state_dict(),
             "adv_head_state_dict": self.adv_head.state_dict(),
-            "concrete_lower": concrete_lower,
-            "concrete_upper": concrete_upper,
-            "structured_diff_pruning": structured_diff_pruning
+            "concrete_lower": self.concrete_lower,
+            "concrete_upper": self.concrete_upper,
+            "structured_diff_pruning": self.structured_diff_pruning,
+            "sparsity_pen": self.sparsity_pen
         }
 
         output_dir = Path(output_dir)
@@ -435,27 +452,23 @@ class AdvDiffModel(BasePruningModel):
         info_dict = torch.load(filepath, map_location=map_location)
 
         cls_instance = cls(
-            info_dict['model_name'],
-            info_dict['num_labels_task'],
-            info_dict['num_labels_protected'],
-            info_dict['task_dropout'],
-            info_dict['task_n_hidden'],
-            info_dict['adv_dropout'],
-            info_dict['adv_n_hidden'],
-            info_dict['adv_count'],
-            info_dict['bottleneck'],
-            info_dict['bottleneck_dim'],
-            info_dict['bottleneck_dropout']
-        )
-
-        cls_instance._add_diff_parametrizations(
-            n_parametrizations = 1,
-            p_requires_grad = False,
-            fixmask_init = info_dict["fixmask"],
-            alpha_init = 5, # standard value for alpha init, not important here as it will be overwritten by checkpoint
+            model_name = info_dict['model_name'],
+            num_labels_task = info_dict['num_labels_task'],
+            num_labels_protected = info_dict['num_labels_protected'],
+            task_dropout = info_dict['task_dropout'],
+            task_n_hidden = info_dict['task_n_hidden'],
+            adv_dropout = info_dict['adv_dropout'],
+            adv_n_hidden = info_dict['adv_n_hidden'],
+            adv_count = info_dict['adv_count'],
+            bottleneck = info_dict['bottleneck'],
+            bottleneck_dim = info_dict['bottleneck_dim'],
+            bottleneck_dropout = info_dict['bottleneck_dropout'],
+            fixmask_init = info_dict['fixmask'],
             concrete_lower = info_dict['concrete_lower'],
             concrete_upper = info_dict['concrete_upper'],
-            structured = info_dict['structured_diff_pruning']
+            structured_diff_pruning = info_dict['structured_diff_pruning'],
+            alpha_init = 5,
+            sparsity_pen = info_dict['sparsity_pen']
         )
 
         cls_instance.encoder.load_state_dict(info_dict['encoder_state_dict'])

@@ -44,6 +44,11 @@ def train_diff_pruning_task(
         bottleneck = args_train.bottleneck,
         bottleneck_dim = args_train.bottleneck_dim,
         bottleneck_dropout = args_train.bottleneck_dropout,
+        concrete_lower = args_train.concrete_lower,
+        concrete_upper = args_train.concrete_upper,
+        structured_diff_pruning = args_train.structured_diff_pruning,
+        alpha_init = args_train.alpha_init,
+        sparsity_pen = args_train.sparsity_pen,
         model_state_dict = encoder_state_dict
     )
     trainer.to(device)
@@ -56,12 +61,7 @@ def train_diff_pruning_task(
         metrics = metrics,
         num_epochs_finetune = args_train.num_epochs_finetune,
         num_epochs_fixmask = args_train.num_epochs_fixmask,
-        alpha_init = args_train.alpha_init,
         concrete_samples = args_train.concrete_samples,
-        concrete_lower = args_train.concrete_lower,
-        concrete_upper = args_train.concrete_upper,
-        structured_diff_pruning = args_train.structured_diff_pruning,
-        sparsity_pen = args_train.sparsity_pen,
         learning_rate = args_train.learning_rate,
         learning_rate_bottleneck = args_train.learning_rate_bottleneck,
         learning_rate_head = args_train.learning_rate_task_head,
@@ -112,6 +112,11 @@ def train_diff_pruning_adv(
         bottleneck = args_train.bottleneck,
         bottleneck_dim = args_train.bottleneck_dim,
         bottleneck_dropout = args_train.bottleneck_dropout,
+        concrete_lower = args_train.concrete_lower,
+        concrete_upper = args_train.concrete_upper,
+        structured_diff_pruning = args_train.structured_diff_pruning,
+        alpha_init = args_train.alpha_init,
+        sparsity_pen = args_train.sparsity_pen,
         model_state_dict = encoder_state_dict
     )
     trainer.to(device)
@@ -128,13 +133,8 @@ def train_diff_pruning_adv(
         num_epochs_warmup = args_train.num_epochs_warmup,
         num_epochs_finetune = args_train.num_epochs_finetune,
         num_epochs_fixmask = args_train.num_epochs_fixmask,
-        alpha_init = args_train.alpha_init,
         concrete_samples = args_train.concrete_samples,
-        concrete_lower = args_train.concrete_lower,
-        concrete_upper = args_train.concrete_upper,
-        structured_diff_pruning = args_train.structured_diff_pruning,
         adv_lambda = args_train.adv_lambda,
-        sparsity_pen = args_train.sparsity_pen,
         learning_rate = args_train.learning_rate,
         learning_rate_bottleneck = args_train.learning_rate_bottleneck,
         learning_rate_task_head = args_train.learning_rate_task_head,
@@ -187,6 +187,12 @@ def train_diff_pruning_modular(
         bottleneck = args_train.bottleneck,
         bottleneck_dim = args_train.bottleneck_dim,
         bottleneck_dropout = args_train.bottleneck_dropout,
+        sparse_task = args_train.modular_sparse_task,
+        concrete_lower = args_train.concrete_lower,
+        concrete_upper = args_train.concrete_upper,
+        structured_diff_pruning = args_train.structured_diff_pruning,
+        alpha_init = args_train.alpha_init,
+        sparsity_pen = args_train.sparsity_pen,
         model_state_dict = encoder_state_dict
     )
     trainer.to(device)
@@ -203,13 +209,8 @@ def train_diff_pruning_modular(
         num_epochs_warmup = args_train.num_epochs_warmup,
         num_epochs_finetune = args_train.num_epochs_finetune,
         num_epochs_fixmask = args_train.num_epochs_fixmask,
-        alpha_init = args_train.alpha_init,
         concrete_samples = args_train.concrete_samples,
-        concrete_lower = args_train.concrete_lower,
-        concrete_upper = args_train.concrete_upper,
-        structured_diff_pruning = args_train.structured_diff_pruning,
         adv_lambda = args_train.adv_lambda,
-        sparsity_pen = args_train.sparsity_pen,
         learning_rate = args_train.learning_rate,
         learning_rate_bottleneck = args_train.learning_rate_bottleneck,
         learning_rate_task_head = args_train.learning_rate_task_head,
@@ -219,7 +220,6 @@ def train_diff_pruning_modular(
         weight_decay = args_train.weight_decay,
         max_grad_norm = args_train.max_grad_norm,
         output_dir = args_train.output_dir,
-        sparse_task = args_train.modular_sparse_task,
         merged_cutoff = args_train.modular_merged_cutoff,
         merged_min_pct = args_train.modular_merged_min_pct,
         fixmask_pct = args_train.fixmask_pct,
@@ -601,7 +601,6 @@ def main():
             train_logger,
             train_loader, 
             val_loader,
-            num_labels,
             num_labels_protected_list,
             protected_key_list,
             protected_class_weights_list
