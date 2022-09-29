@@ -120,7 +120,7 @@ class AdvOnlyDiffModel(BasePruningModel):
 
         log_ratio = self.get_log_ratio(concrete_lower, concrete_upper)
 
-        self._init_sparsity_pen(sparsity_pen)
+        self.get_sparsity_pen(sparsity_pen)
         self._add_diff_parametrizations(
             n_parametrizations = 1,
             p_requires_grad = False,
@@ -279,7 +279,7 @@ class AdvOnlyDiffModel(BasePruningModel):
             loss_no_pen = loss.item()
 
             if self._model_state == ModelState.FINETUNING:
-                loss += self._get_sparsity_pen(log_ratio, 0)
+                loss += self._get_sparsity_loss(log_ratio, 0)
 
             loss.backward()
 

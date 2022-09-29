@@ -169,7 +169,7 @@ class DoubleDiffModel(BasePruningModel):
 
         log_ratio = self.get_log_ratio(concrete_lower, concrete_upper)
 
-        self._init_sparsity_pen(sparsity_pen)
+        self.get_sparsity_pen(sparsity_pen)
 
         self._add_diff_parametrizations(
             alpha_init = alpha_init,
@@ -349,7 +349,7 @@ class DoubleDiffModel(BasePruningModel):
                 loss += loss_task
 
                 if self.finetune_state:
-                    loss_l0 = self._get_sparsity_pen(log_ratio)
+                    loss_l0 = self._get_sparsity_loss(log_ratio)
                     loss += loss_l0
                 else:
                     loss_l0 = torch.tensor(0.)
@@ -387,7 +387,7 @@ class DoubleDiffModel(BasePruningModel):
                 loss += loss_protected
 
                 if self.finetune_state:
-                    loss_l0_adv = self._get_sparsity_pen(log_ratio)
+                    loss_l0_adv = self._get_sparsity_loss(log_ratio)
                     loss += loss_l0_adv
                 else:
                     loss_l0_adv = torch.tensor(0.)
@@ -659,7 +659,7 @@ class DoubleDiffModel(BasePruningModel):
         self.fixmask_pct = pct
 
 
-    def _get_sparsity_pen(self, log_ratio: float) -> torch.Tensor:
+    def _get_sparsity_loss(self, log_ratio: float) -> torch.Tensor:
         assert self.model_state == ModelState.FINETUNING, "model needs to be in finetuning state"
         l0_pen = 0.
         for module_name, base_module in self.get_encoder_base_modules(return_names=True):

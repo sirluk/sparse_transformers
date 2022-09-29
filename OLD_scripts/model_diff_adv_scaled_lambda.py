@@ -111,7 +111,7 @@ class AdvDiffModel(BasePruningModel):
 
         log_ratio = self.get_log_ratio(concrete_lower, concrete_upper)
 
-        self._init_sparsity_pen(sparsity_pen)
+        self.get_sparsity_pen(sparsity_pen)
 
         if not self.parametrized:
             self._add_diff_parametrizations(
@@ -286,7 +286,7 @@ class AdvDiffModel(BasePruningModel):
                 loss += loss_protected
 
                 if self.finetune_state:
-                    loss_l0 = self._get_sparsity_pen(log_ratio, 0)
+                    loss_l0 = self._get_sparsity_loss(log_ratio, 0)
                     loss += loss_l0
                 else: 
                     loss_l0 = torch.tensor(0.)

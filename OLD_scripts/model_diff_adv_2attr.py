@@ -103,7 +103,7 @@ class AdvDiffModel_2attr(AdvDiffModel):
 
         log_ratio = self.get_log_ratio(concrete_lower, concrete_upper)
 
-        self._init_sparsity_pen(sparsity_pen)
+        self.get_sparsity_pen(sparsity_pen)
 
         if not self.parametrized:
             self._add_diff_parametrizations(
@@ -287,7 +287,7 @@ class AdvDiffModel_2attr(AdvDiffModel):
                 loss += loss_attr_bias
 
                 if self.finetune_state:
-                    loss_l0_adv = self._get_sparsity_pen(log_ratio, 0)
+                    loss_l0_adv = self._get_sparsity_loss(log_ratio, 0)
                     loss += loss_l0_adv
                 else:
                     loss_l0_adv = torch.tensor(0.)

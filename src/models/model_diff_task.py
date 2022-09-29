@@ -31,7 +31,6 @@ class TaskDiffModel(BasePruningModel):
         concrete_upper: Optional[float] = 1.5,
         structured_diff_pruning: Optional[bool] = True,
         alpha_init: Optional[Union[int, float]] = 5,
-        sparsity_pen: Optional[Union[float, list, tuple]] = 1.25e-7,
         **kwargs
     ):
         super().__init__(model_name, **kwargs)
@@ -66,8 +65,6 @@ class TaskDiffModel(BasePruningModel):
             structured = structured_diff_pruning
         )
 
-        self._init_sparsity_pen(sparsity_pen)
-
     def _forward(self, **x) -> torch.Tensor:
         hidden = super()._forward(**x)
         return self.bottleneck(hidden)
@@ -86,6 +83,7 @@ class TaskDiffModel(BasePruningModel):
         num_epochs_finetune: int,
         num_epochs_fixmask: int,
         concrete_samples: int,
+        sparsity_pen: Union[float, list, tuple],
         learning_rate: float,
         learning_rate_bottleneck: float,
         learning_rate_head: float,
@@ -98,7 +96,6 @@ class TaskDiffModel(BasePruningModel):
         concrete_lower: Optional[float] = None,
         concrete_upper: Optional[float] = None,
         structured_diff_pruning: Optional[bool] = None,
-        sparsity_pen: Optional[Union[float, list, tuple]] = None,
         fixmask_pct: Optional[float] = None,
         checkpoint_name: Optional[str] = None,
         seed: Optional[int] = None
@@ -122,10 +119,8 @@ class TaskDiffModel(BasePruningModel):
                 setattr(self, s, v)
                 self._parametrizations_set_attr(s, v)
 
-        if sparsity_pen is not None:
-            self._init_sparsity_pen(sparsity_pen)
-
-        log_ratio = self.get_log_ratio(self.concrete_lower, self.concrete_upper)       
+        log_ratio = self.get_log_ratio(self.concrete_lower, self.concrete_upper)
+        sparsity_pen = self.get_sparsity_pen(sparsity_pen)      
 
         self._init_optimizer_and_schedule(
             train_steps_finetune,
@@ -162,6 +157,7 @@ class TaskDiffModel(BasePruningModel):
                 loss_fn,
                 logger,
                 log_ratio,
+                sparsity_pen,
                 max_grad_norm,
                 concrete_samples
             )
@@ -228,6 +224,7 @@ class TaskDiffModel(BasePruningModel):
         loss_fn: Callable,
         logger: TrainLogger,
         log_ratio: float,
+        sparsity_pen: list,
         max_grad_norm: float,
         concrete_samples: int
     ) -> None:
@@ -252,7 +249,7 @@ class TaskDiffModel(BasePruningModel):
                 loss += loss_task
 
                 if self.finetune_state:
-                    loss_l0 = self._get_sparsity_pen(log_ratio, 0)
+                    loss_l0 = self._get_sparsity_loss(log_ratio, sparsity_pen, 0)
                     loss += loss_l0
                 else:
                     loss_l0 = torch.tensor(0.)
@@ -348,8 +345,7 @@ class TaskDiffModel(BasePruningModel):
             "task_head_state_dict": self.task_head.state_dict(),
             "concrete_lower": self.concrete_lower,
             "concrete_upper": self.concrete_upper,
-            "structured_diff_pruning": self.structured_diff_pruning,
-            "sparsity_pen": self.sparsity_pen
+            "structured_diff_pruning": self.structured_diff_pruning
         }
 
         output_dir = Path(output_dir)
@@ -383,8 +379,7 @@ class TaskDiffModel(BasePruningModel):
             concrete_lower = info_dict['concrete_lower'],
             concrete_upper = info_dict['concrete_upper'],
             structured_diff_pruning = info_dict['structured_diff_pruning'],
-            alpha_init = 5,
-            sparsity_pen = info_dict['sparsity_pen']
+            alpha_init = 5
         )
 
         cls_instance.encoder.load_state_dict(info_dict['encoder_state_dict'])

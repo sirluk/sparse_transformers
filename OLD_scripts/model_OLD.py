@@ -84,7 +84,7 @@ class DiffModel(BaseDiffModel):
 
         log_ratio = self.get_log_ratio(concrete_lower, concrete_upper)
 
-        self._init_sparsity_pen(sparsity_pen)
+        self.get_sparsity_pen(sparsity_pen)
         self._add_diff_parametrizations(
             alpha_init,
             concrete_lower,

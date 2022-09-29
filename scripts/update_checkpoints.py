@@ -31,8 +31,8 @@ for m_cls, pat in main_iter:
     for exp_name in tqdm([e for e in experiments if re.match(pat, e)], leave=False, position=1):
         filepath = os.path.join(PATH, exp_name)
         info_dict = torch.load(filepath, map_location="cpu")
-        if "sparsity_pen" not in info_dict:
-            info_dict["sparsity_pen"] = 1.25e-7
+        if "cls_name" not in info_dict:
+            info_dict["cls_name"] = m_cls.__name__
             torch.save(info_dict, filepath)
         # import IPython; IPython.embed(); exit(1)
         

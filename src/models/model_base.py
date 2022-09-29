@@ -254,12 +254,25 @@ class BasePruningModel(BaseModel):
         return [(n,m) if return_names else m for n,m in self.encoder.named_modules() if check_fn(m)]
 
 
-    def _init_sparsity_pen(self, sparsity_pen: Union[float, List[float]]) -> None:
-        if isinstance(sparsity_pen, list):
-            self.sparsity_pen = sparsity_pen
+    def get_sparsity_pen(self, sparsity_pen: Union[float, List[float], Tuple[float]]) -> None:
+        if isinstance(sparsity_pen, (list, tuple)):
             assert len(sparsity_pen) == self.total_layers,  "invalid sparsity penalty per layer: # of layers mismatch"
+            return sparsity_pen
         else:
-            self.sparsity_pen = [sparsity_pen] * self.total_layers
+            return [sparsity_pen] * self.total_layers
+
+
+    def _get_sparsity_loss(self, log_ratio: float, sparsity_pen: list, idx: int) -> torch.Tensor:
+        assert self.finetune_state, "model needs to be in finetuning state"
+        l0_pen = 0.
+        for module_name, base_module in self.get_encoder_base_modules(return_names=True):
+            layer_idx = self.get_layer_idx_from_module(module_name)
+            module_pen = 0.
+            for n, par_list in list(base_module.parametrizations.items()):
+                for a in par_list[idx].alpha_weights:
+                    module_pen += self.get_l0_norm_term(a, log_ratio)
+            l0_pen += (module_pen * sparsity_pen[layer_idx])
+        return l0_pen
 
 
     @torch.no_grad()
@@ -473,20 +486,6 @@ class BasePruningModel(BaseModel):
                     "lr": learning_rate_alpha
                 }
             ]
-
-
-    def _get_sparsity_pen(self, log_ratio: float, idx: int) -> torch.Tensor:
-        assert self.finetune_state, "model needs to be in finetuning state"
-        l0_pen = 0.
-        for module_name, base_module in self.get_encoder_base_modules(return_names=True):
-            layer_idx = self.get_layer_idx_from_module(module_name)
-            sparsity_pen = self.sparsity_pen[layer_idx]
-            module_pen = 0.
-            for n, par_list in list(base_module.parametrizations.items()):
-                for a in par_list[idx].alpha_weights:
-                    module_pen += self.get_l0_norm_term(a, log_ratio)
-            l0_pen += (module_pen * sparsity_pen)
-        return l0_pen
 
 
     @contextlib.contextmanager

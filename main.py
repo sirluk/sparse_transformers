@@ -48,7 +48,6 @@ def train_diff_pruning_task(
         concrete_upper = args_train.concrete_upper,
         structured_diff_pruning = args_train.structured_diff_pruning,
         alpha_init = args_train.alpha_init,
-        sparsity_pen = args_train.sparsity_pen,
         model_state_dict = encoder_state_dict
     )
     trainer.to(device)
@@ -62,6 +61,7 @@ def train_diff_pruning_task(
         num_epochs_finetune = args_train.num_epochs_finetune,
         num_epochs_fixmask = args_train.num_epochs_fixmask,
         concrete_samples = args_train.concrete_samples,
+        sparsity_pen = args_train.sparsity_pen,
         learning_rate = args_train.learning_rate,
         learning_rate_bottleneck = args_train.learning_rate_bottleneck,
         learning_rate_head = args_train.learning_rate_task_head,
@@ -116,7 +116,6 @@ def train_diff_pruning_adv(
         concrete_upper = args_train.concrete_upper,
         structured_diff_pruning = args_train.structured_diff_pruning,
         alpha_init = args_train.alpha_init,
-        sparsity_pen = args_train.sparsity_pen,
         model_state_dict = encoder_state_dict
     )
     trainer.to(device)
@@ -135,6 +134,7 @@ def train_diff_pruning_adv(
         num_epochs_fixmask = args_train.num_epochs_fixmask,
         concrete_samples = args_train.concrete_samples,
         adv_lambda = args_train.adv_lambda,
+        sparsity_pen = args_train.sparsity_pen,
         learning_rate = args_train.learning_rate,
         learning_rate_bottleneck = args_train.learning_rate_bottleneck,
         learning_rate_task_head = args_train.learning_rate_task_head,
@@ -192,7 +192,6 @@ def train_diff_pruning_modular(
         concrete_upper = args_train.concrete_upper,
         structured_diff_pruning = args_train.structured_diff_pruning,
         alpha_init = args_train.alpha_init,
-        sparsity_pen = args_train.sparsity_pen,
         model_state_dict = encoder_state_dict
     )
     trainer.to(device)
@@ -211,6 +210,7 @@ def train_diff_pruning_modular(
         num_epochs_fixmask = args_train.num_epochs_fixmask,
         concrete_samples = args_train.concrete_samples,
         adv_lambda = args_train.adv_lambda,
+        sparsity_pen = args_train.sparsity_pen,
         learning_rate = args_train.learning_rate,
         learning_rate_bottleneck = args_train.learning_rate_bottleneck,
         learning_rate_task_head = args_train.learning_rate_task_head,

@@ -492,7 +492,7 @@ class AdvModel(BaseModel):
             loss = loss_fn(outputs, labels_task.to(self.device))
             
             if self._model_state == ModelState.FINETUNING:
-                loss += self._get_sparsity_pen(0)
+                loss += self._get_sparsity_loss(0)
             
             loss_biased = loss.item()
             loss.backward()

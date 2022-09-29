@@ -108,7 +108,7 @@ class ModularDiffModel_2attr(ModularDiffModel):
 
         log_ratio = self.get_log_ratio(concrete_lower, concrete_upper)
 
-        self._init_sparsity_pen(sparsity_pen)
+        self.get_sparsity_pen(sparsity_pen)
 
         if not self.parametrized:
             self._add_diff_parametrizations(
@@ -318,7 +318,7 @@ class ModularDiffModel_2attr(ModularDiffModel):
                 loss_biased += loss_task
 
                 if self.finetune_state and self.sparse_task:
-                    loss_l0 = self._get_sparsity_pen(log_ratio, 0)
+                    loss_l0 = self._get_sparsity_loss(log_ratio, 0)
                     loss_biased += loss_l0
                 else:
                     loss_l0 = torch.tensor(0.)
@@ -360,7 +360,7 @@ class ModularDiffModel_2attr(ModularDiffModel):
                 loss_debiased += loss_attr_bias
 
                 if self.finetune_state:
-                    loss_l0_adv = self._get_sparsity_pen(log_ratio, int(self.sparse_task))
+                    loss_l0_adv = self._get_sparsity_loss(log_ratio, int(self.sparse_task))
                     loss_debiased += loss_l0_adv
                 else:
                     loss_l0_adv = torch.tensor(0.)

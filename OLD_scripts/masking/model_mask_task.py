@@ -72,7 +72,7 @@ class BaseMaskPruningModel(BaseModel):
             return self.total_layers - 1
     
     
-    def _init_sparsity_pen(self, sparsity_pen: Union[float, List[float]]) -> None:        
+    def get_sparsity_pen(self, sparsity_pen: Union[float, List[float]]) -> None:        
         if isinstance(sparsity_pen, list):
             self.sparsity_pen = sparsity_pen
             assert len(sparsity_pen) == self.total_layers,  "invalid sparsity penalty per layer: # of layers mismatch"
@@ -234,7 +234,7 @@ class BaseMaskPruningModel(BaseModel):
             ]
         
         
-    def _get_sparsity_pen(self, idx: int) -> torch.Tensor:
+    def _get_sparsity_loss(self, idx: int) -> torch.Tensor:
         l0_pen = 0.
         for module_name, base_module in self.get_encoder_base_modules(return_names=True):
             layer_idx = self.get_layer_idx_from_module(module_name)
@@ -297,7 +297,7 @@ class TaskMaskingModel(BasePruningModel):
         
         log_ratio = self.get_log_ratio(concrete_lower, concrete_upper)
         
-        self._init_sparsity_pen(sparsity_pen)
+        self.get_sparsity_pen(sparsity_pen)
         self._add_diff_parametrizations(
             n_parametrizations = 1,
             p_requires_grad = False,
@@ -706,7 +706,7 @@ class TaskMaskingModel(BasePruningModel):
         )
         
         
-    def _init_sparsity_pen(self, sparsity_pen: Union[float, List[float]]) -> None:        
+    def get_sparsity_pen(self, sparsity_pen: Union[float, List[float]]) -> None:        
         if isinstance(sparsity_pen, list):
             self.sparsity_pen = sparsity_pen
             assert len(sparsity_pen) == self.total_layers,  "invalid sparsity penalty per layer: # of layers mismatch"
