@@ -89,8 +89,8 @@ def run_adv_attack(
     protected_class_weights
 ):
 
-    if isinstance(num_labels_protected, int):
-        if isinstance(args_train.protected_key, (list, tuple)): 
+    if isinstance(args_train.protected_key, (list, tuple)): 
+        if isinstance(protected_key, int) or len(protected_key)!=len(args_train.protected_key):
             train_loader, val_loader, _, num_labels_protected, protected_key, protected_class_weights = get_data(
                 args_train,
                 use_all_attr = True,
@@ -101,10 +101,12 @@ def run_adv_attack(
             train_data = generate_embeddings(trainer, train_loader, forward_fn = lambda m, x: m._forward(**x))
             val_data = generate_embeddings(trainer, val_loader, forward_fn = lambda m, x: m._forward(**x))
             gen_emb = False
-        else:
+        elif isinstance(protected_key, int):
             num_labels_protected = [num_labels_protected]
             protected_key = [protected_key]
             protected_class_weights = [protected_class_weights]
+            gen_emb = True
+        else:
             gen_emb = True
     else:
         gen_emb = True
