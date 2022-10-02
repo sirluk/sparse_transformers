@@ -89,39 +89,41 @@ def run_adv_attack(
     protected_class_weights
 ):
 
-    if isinstance(args_train.protected_key, (list, tuple)):
-        if len(args_train.protected_key)==1 and isinstance(protected_key, int):
-                num_labels_protected = [num_labels_protected]
-                protected_key = [protected_key]
-                protected_class_weights = [protected_class_weights]
-                gen_emb = True
-        elif isinstance(protected_key, int) or len(protected_key)!=len(args_train.protected_key):
-            train_loader, val_loader, _, num_labels_protected, protected_key, protected_class_weights = get_data(
-                args_train,
-                use_all_attr = True,
-                compute_class_weights = args_train.weighted_loss_protected,
-                device = trainer.device,
-                debug = base_args.debug
-            )
-            train_data = generate_embeddings(trainer, train_loader, forward_fn = lambda m, x: m._forward(**x))
-            val_data = generate_embeddings(trainer, val_loader, forward_fn = lambda m, x: m._forward(**x))
-            gen_emb = False
-        else:
-            gen_emb = True
-    else:
-        gen_emb = True
+    args_train_prot_key_islist = isinstance(args_train.protected_key, (list, tuple))
+    args_train_prot_key_len = len(args_train.protected_key)
+    prot_key_islist = isinstance(protected_key, (list, tuple))
+    prot_key_len = len(protected_key)
+    
+    gen_loaders = args_train_prot_key_islist and (
+        (not prot_key_islist and args_train_prot_key_len>1) or
+        (prot_key_islist and prot_key_len!=args_train_prot_key_len)
+    )
+    if gen_loaders:
+        train_loader, val_loader, _, num_labels_protected, protected_key, protected_class_weights = get_data(
+            args_train,
+            use_all_attr = True,
+            compute_class_weights = args_train.weighted_loss_protected,
+            device = trainer.device,
+            debug = base_args.debug
+        )
+    train_data = generate_embeddings(trainer, train_loader, forward_fn = lambda m, x: m._forward(**x))
+    val_data = generate_embeddings(trainer, val_loader, forward_fn = lambda m, x: m._forward(**x))
+
+    if not prot_key_islist:
+        num_labels_protected = [num_labels_protected]
+        protected_key = [protected_key]
+        protected_class_weights = [protected_class_weights]
 
     for (i, (num_lbl_prot, prot_k, prot_w)) in enumerate(zip(num_labels_protected, protected_key, protected_class_weights)):
 
         label_idx = i+2
 
-        if not gen_emb: 
-            train_loader = DataLoader(
-                TensorDataset(train_data[0], train_data[label_idx]), shuffle=True, batch_size=args_attack.attack_batch_size, drop_last=False
-            )
-            val_loader = DataLoader(
-                TensorDataset(val_data[0], val_data[label_idx]), shuffle=False, batch_size=args_attack.attack_batch_size, drop_last=False
-            )
+        train_loader = DataLoader(
+            TensorDataset(train_data[0], train_data[label_idx]), shuffle=True, batch_size=args_attack.attack_batch_size, drop_last=False
+        )
+        val_loader = DataLoader(
+            TensorDataset(val_data[0], val_data[label_idx]), shuffle=False, batch_size=args_attack.attack_batch_size, drop_last=False
+        )
 
         debiased_embeddings = (base_args.adv or base_args.modular) and ((i == base_args.prot_key_idx) or (base_args.prot_key_idx is None))
 
@@ -141,7 +143,7 @@ def run_adv_attack(
             num_epochs = args_attack.num_epochs,
             lr = args_attack.learning_rate,
             cooldown = args_attack.cooldown,
-            create_hidden_dataloader = gen_emb,
+            create_hidden_dataloader = False,
             batch_size = args_attack.attack_batch_size,
             label_idx = label_idx,
             logger_suffix = f"adv_attack{'_debiased' if debiased_embeddings else ''}_{prot_k}"
@@ -163,7 +165,7 @@ def run_adv_attack(
                 num_epochs = args_attack.num_epochs,
                 lr = args_attack.learning_rate,
                 cooldown = args_attack.cooldown,
-                create_hidden_dataloader = gen_emb,
+                create_hidden_dataloader = False,
                 batch_size = args_attack.attack_batch_size,
                 label_idx = label_idx,
                 logger_suffix = f"adv_attack_{prot_k}"
