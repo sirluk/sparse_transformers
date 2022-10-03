@@ -8,7 +8,6 @@ from torch.optim import AdamW
 from torch.utils.data import DataLoader, TensorDataset
 
 from src.models.model_diff_adv import AdvDiffModel
-from src.models.model_diff_adv_2attr import AdvDiffModel_2attr
 from src.models.model_task import TaskModel
 from src.models.model_heads import ClfHead
 from src.model_functions import merge_diff_models, train_head
@@ -17,7 +16,9 @@ from src.data_handler import get_data
 from src.model_functions import generate_embeddings
 from src.utils import get_logger_custom, get_callables
 
+DEBUG = False
 GPU_ID = 0
+SEED = 0
 DEVICE = f"cuda:{GPU_ID}" if torch.cuda.is_available() else "cpu"
 DS = "pan16"
 LOG_DIR = "logs_custom"
@@ -25,13 +26,16 @@ LOGGER_NAME = "merged_mask_model_seed0"
 MODEL_ADV_CLS = AdvDiffModel
 MODEL_TASK_CLS = TaskModel
 CP = {
-    "task": "/share/home/lukash/pan16/bertl4/cp/task-baseline-bert_uncased_L-4_H-256_A-4-64-2e-05-seed0.pt",
-    "gender": "/share/home/lukash/pan16/bertl4/cp_init/task-baseline-bert_uncased_L-4_H-256_A-4-64-2e-05-seed0.pt/cp/adverserial-diff_pruning_0.1-bert_uncased_L-4_H-256_A-4-64-2e-05-cp_init-gender-seed0.pt",
-    "age": "/share/home/lukash/pan16/bertl4/cp_init/task-baseline-bert_uncased_L-4_H-256_A-4-64-2e-05-seed0.pt/cp/adverserial-diff_pruning_0.1-bert_uncased_L-4_H-256_A-4-64-2e-05-cp_init-age-seed0.pt"
+    "task": "/share/home/lukash/pan16/bertl4/cp/task-baseline-bert_uncased_L-4_H-256_A-4-64-2e-05-seed{}.pt".format(SEED),
+    "gender": "/share/home/lukash/pan16/bertl4/cp_init/task_baseline/cp/adverserial-diff_pruning_0.1-bert_uncased_L-4_H-256_A-4-64-2e-05-cp_init-weighted_loss_prot-gender-seed{}.pt".format(SEED),
+    "age": "/share/home/lukash/pan16/bertl4/cp_init/task_baseline/cp/adverserial-diff_pruning_0.1-bert_uncased_L-4_H-256_A-4-64-2e-05-cp_init-weighted_loss_prot-age-seed{}.pt".format(SEED)
 }
 
 
 def main():
+
+    torch.manual_seed(SEED)
+    print(f"torch.manual_seed({SEED})")
 
     model_gender = MODEL_ADV_CLS.load_checkpoint(CP["gender"])
     model_age = MODEL_ADV_CLS.load_checkpoint(CP["age"])
@@ -77,8 +81,13 @@ def main():
         logger_name=LOGGER_NAME
     )
 
-    train_loader, val_loader, num_labels, num_labels_protected, num_labels_protected2 = \
-        get_data(args_train, use_all_attr=True, debug=False)
+    train_loader, val_loader, num_labels, num_labels_protected_list, protected_key_list, protected_class_weights_list = get_data(
+        args_train = args_train,
+        use_all_attr = True,
+        compute_class_weights = args_train.weighted_loss_protected,
+        device = DEVICE,
+        debug = DEBUG
+    )
 
     train_data = generate_embeddings(model, train_loader, forward_fn = lambda m, x: m._forward(**x))
     val_data = generate_embeddings(model, val_loader, forward_fn = lambda m, x: m._forward(**x))
@@ -114,14 +123,16 @@ def main():
         desc = "task_eval"
     )
 
-    for i, (attr, num_labels) in enumerate(zip(args_train.protected_key, [num_labels_protected, num_labels_protected2])):
+    for i, (num_lbl_prot, prot_k, prot_w) in enumerate(zip(num_labels_protected_list, protected_key_list, protected_class_weights_list)):
 
-        ds_train = TensorDataset(train_data[0], train_data[i+2])
-        ds_val = TensorDataset(val_data[0], val_data[i+2])
+        label_idx = i+2
+
+        ds_train = TensorDataset(train_data[0], train_data[label_idx])
+        ds_val = TensorDataset(val_data[0], val_data[label_idx])
         train_loader = DataLoader(ds_train, shuffle=True, batch_size=args_attack.attack_batch_size, drop_last=False)
         val_loader = DataLoader(ds_val, shuffle=False, batch_size=args_attack.attack_batch_size, drop_last=False)
 
-        loss_fn, pred_fn, metrics = get_callables(num_labels)
+        loss_fn, pred_fn, metrics = get_callables(num_lbl_prot, prot_w)
 
         adv_attack(
             trainer = model,
@@ -131,14 +142,16 @@ def main():
             loss_fn = loss_fn,
             pred_fn = pred_fn,
             metrics = metrics,
-            num_labels = num_labels,
+            num_labels = num_lbl_prot,
             adv_n_hidden = args_attack.adv_n_hidden,
             adv_count = args_attack.adv_count,
             adv_dropout = args_attack.adv_dropout,
             num_epochs = args_attack.num_epochs,
             lr = args_attack.learning_rate,
+            cooldown = args_attack.cooldown,
             create_hidden_dataloader = False,
-            logger_suffix = f"adv_attack_{attr}"
+            label_idx = label_idx,
+            logger_suffix = f"adv_attack_{prot_k}"
         )
 
 

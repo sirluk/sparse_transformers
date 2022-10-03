@@ -7,7 +7,7 @@ import torch
 from torch.optim import Optimizer
 from torch.utils.data import DataLoader
 
-from src.models.model_base import BaseModel, BasePruningModel
+from src.models.model_base import BaseModel
 from src.models.model_diff_modular import ModularDiffModel
 from src.models.model_diff_adv import AdvDiffModel
 from src.models.model_diff_task import TaskDiffModel
