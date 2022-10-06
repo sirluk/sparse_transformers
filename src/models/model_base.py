@@ -88,7 +88,7 @@ class BaseModel(torch.nn.Module):
         loss_fn: Callable,
         pred_fn: Callable,
         metrics: Dict[str, Callable],
-        label_idx: int = 1,
+        label_idx: int = 0,
         desc: str = "",
         **kwargs
         ) -> dict:
@@ -100,7 +100,7 @@ class BaseModel(torch.nn.Module):
         val_iterator = tqdm(val_loader, desc=f"evaluating {desc}", leave=False, position=1)
         for i, batch in enumerate(val_iterator):
 
-            inputs, labels = batch[0], batch[label_idx]
+            inputs, labels = batch[0], batch[1+label_idx]
             if isinstance(inputs, dict):
                 inputs = dict_to_device(inputs, self.device)
             else:
@@ -329,12 +329,12 @@ class BasePruningModel(BaseModel):
         return p_counts.tolist()
 
 
-    def _remove_parametrizations(self) -> None:
+    def _remove_parametrizations(self, leave_parametrized: bool = True) -> None:
         self._freeze_parametrizations(True)
         for module in self.get_encoder_base_modules():
             try:
                 for n in list(module.parametrizations):
-                    parametrize.remove_parametrizations(module, n)
+                    parametrize.remove_parametrizations(module, n, leave_parametrized=leave_parametrized)
             except AttributeError:
                 pass
         self.model_state = ModelState.INIT
@@ -397,7 +397,18 @@ class BasePruningModel(BaseModel):
 
 
     @torch.no_grad()
-    def _finetune_to_fixmask(self, pct: Optional[float] = None, n_parametrizations: int = 1, merged_cutoff: bool = False, merged_min_pct: float = 0.01) -> None:
+    def _finetune_to_fixmask(
+        self,
+        pct: Optional[float] = None,
+        sequential: Union[bool, list, tuple] = True,
+        merged_cutoff: bool = False,
+        merged_min_pct: float = 0.01
+    ) -> None:
+
+        if isinstance(sequential, (list, tuple)):
+            assert len(sequential) == self.n_parametrizations, "if sequential is list, needs to equal self.n_parametrizations"
+        else:
+            sequential = [sequential] * self.n_parametrizations
 
         def _get_cutoff(values, pct, abs = True):
             k = int(round(len(values) * pct, 0))
@@ -410,16 +421,16 @@ class BasePruningModel(BaseModel):
 
             if pct is not None:
 
-                diff_weights_abs = [torch.tensor([])] * n_parametrizations
+                diff_weights_abs = [torch.tensor([])] * self.n_parametrizations
                 for base_module in self.get_encoder_base_modules():
                     for n, par_list in list(base_module.parametrizations.items()):
                         w = par_list.original.detach()
-                        for idx in range(n_parametrizations):
+                        for idx, seq in enumerate(sequential):
                             diff_weight = par_list[idx].diff_weight(w)
                             diff_weights_abs[idx] = torch.cat([diff_weights_abs[idx], torch.abs(diff_weight.flatten().cpu())])
-                            w = diff_weight + w
+                            if seq: w = diff_weight + w
 
-                if merged_cutoff and (n_parametrizations > 1):
+                if merged_cutoff and (self.n_parametrizations > 1):
                     min_cutoffs = [_get_cutoff(x, merged_min_pct, abs=False) for x in diff_weights_abs]
                     if merged_min_pct >= pct:
                         print(f"merged_min_pct >= pct, using target sparsity merged_min_pct={merged_min_pct}")
@@ -435,7 +446,7 @@ class BasePruningModel(BaseModel):
                 for n, par_list in list(base_module.parametrizations.items()):
                     diff_weights = []
                     w = par_list.original
-                    for idx in range(n_parametrizations):
+                    for idx, seq in enumerate(sequential):
                         diff_weight = par_list[idx].diff_weight(w)
                         if pct is not None:
                             i = 0 if merged_cutoff else idx
@@ -443,7 +454,8 @@ class BasePruningModel(BaseModel):
                         else:
                             diff_mask = ~torch.isclose(diff_weight, torch.tensor(0.), rtol=1e-8)
                         diff_weights.append((diff_weight, diff_mask))
-                        w = diff_weight + w
+                        if seq: w = diff_weight + w
+
                     parametrize.remove_parametrizations(base_module, n, leave_parametrized=False)
                     for (diff_weight, diff_mask) in diff_weights:
                         parametrize.register_parametrization(base_module, n, DiffWeightFixmask(diff_weight, diff_mask))

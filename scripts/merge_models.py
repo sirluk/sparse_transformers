@@ -9,8 +9,10 @@ from torch.utils.data import DataLoader, TensorDataset
 
 from src.models.model_diff_adv import AdvDiffModel
 from src.models.model_task import TaskModel
+from src.models.model_diff_modular import ModularDiffModel
 from src.models.model_heads import ClfHead
-from src.model_functions import merge_diff_models, train_head
+from src.models.model_base import BaseModel
+from src.model_functions import merge_diff_models, train_head, merge_models
 from src.adv_attack import adv_attack
 from src.data_handler import get_data
 from src.model_functions import generate_embeddings
@@ -21,15 +23,18 @@ GPU_ID = 0
 SEED = 0
 DEVICE = f"cuda:{GPU_ID}" if torch.cuda.is_available() else "cpu"
 DS = "pan16"
-LOG_DIR = "logs_custom"
-LOGGER_NAME = "merged_mask_model_seed{}".format(SEED)
+LOG_DIR = "logs_merged_masks_modular"
+LOGGER_NAME = "seed{}".format(SEED)
 MODEL_ADV_CLS = AdvDiffModel
 MODEL_TASK_CLS = TaskModel
 CP = {
-    "task": "/share/home/lukash/pan16/bertl4/cp/task-baseline-bert_uncased_L-4_H-256_A-4-64-2e-05-seed{}.pt".format(SEED),
-    "gender": "/share/home/lukash/pan16/bertl4/cp_init/task_baseline/cp/adverserial-diff_pruning_0.1-bert_uncased_L-4_H-256_A-4-64-2e-05-cp_init-weighted_loss_prot-gender-seed{}.pt".format(SEED),
-    "age": "/share/home/lukash/pan16/bertl4/cp_init/task_baseline/cp/adverserial-diff_pruning_0.1-bert_uncased_L-4_H-256_A-4-64-2e-05-cp_init-weighted_loss_prot-age-seed{}.pt".format(SEED)
+    "modular": "../checkpoints_pan16/modular-diff_pruning_0.1-bert_uncased_L-4_H-256_A-4-64-2e-05-weighted_loss_prot-gender_age-seed{}.pt".format(SEED)
 }
+# CP = {
+#     "task": "/share/home/lukash/pan16/bertl4/cp/task-baseline-bert_uncased_L-4_H-256_A-4-64-2e-05-seed{}.pt".format(SEED),
+#     "gender": "/share/home/lukash/pan16/bertl4/cp/adverserial-diff_pruning_0.1-bert_uncased_L-4_H-256_A-4-64-2e-05-weighted_loss_prot-gender-seed{}.pt".format(SEED),
+#     "age": "/share/home/lukash/pan16/bertl4/cp/adverserial-diff_pruning_0.1-bert_uncased_L-4_H-256_A-4-64-2e-05-weighted_loss_prot-age-seed{}.pt".format(SEED)
+# }
 
 
 def main():
@@ -37,33 +42,37 @@ def main():
     torch.manual_seed(SEED)
     print(f"torch.manual_seed({SEED})")
 
-    model_gender = MODEL_ADV_CLS.load_checkpoint(CP["gender"])
-    model_age = MODEL_ADV_CLS.load_checkpoint(CP["age"])
-    if "task" in CP:
-        model_task = MODEL_TASK_CLS.load_checkpoint(CP["task"])
-        model = merge_diff_models([model_gender, model_age], base_model=model_task)
-    else:
-        model = merge_diff_models([model_gender, model_age])
+    modular_model = ModularDiffModel.load_checkpoint(CP["modular"])
+    model_task = modular_model.get_base_weights(as_module=True)
+    model_gender = modular_model.get_diff_weights(idx=0, as_module=True)
+    model_age = modular_model.get_diff_weights(idx=1, as_module=True)
+    model_list = []
+    for m in [model_task, model_gender, model_age]:
+        model_list.append(BaseModel(modular_model.model_name, m.state_dict()))
+    model = merge_models(model_list)
+
+    # model_gender = MODEL_ADV_CLS.load_checkpoint(CP["gender"])
+    # model_age = MODEL_ADV_CLS.load_checkpoint(CP["age"])
+    # if "task" in CP:
+    #     model_task = MODEL_TASK_CLS.load_checkpoint(CP["task"])
+    #     model = merge_diff_models([model_gender, model_age], base_model=model_task)
+    # else:
+    #     model = merge_diff_models([model_gender, model_age])
 
     # # TEMP - for debugging
     # from src.model_functions import get_param_from_name
     
     # samples = []
     # for n, p in model_task.encoder.named_parameters():
-    #     _n = n.split(".")
-    #     np = ".".join(_n[:-1] + ["parametrizations", _n[-1], "original"])
-    #     np_diff = ".".join(_n[:-1] + ["parametrizations", _n[-1], "0", "diff_weight"])
-    #     pg_diff = get_param_from_name(model_gender.encoder, np_diff)
-    #     pa_diff = get_param_from_name(model_age.encoder, np_diff)
+    #     pg_diff = get_param_from_name(model_gender.encoder, n)
+    #     pa_diff = get_param_from_name(model_age.encoder, n)
     #     if p.flatten()[1] != pg_diff.flatten()[1] != pa_diff.flatten()[1]:
-    #         samples.append((n, np, np_diff))
+    #         samples.append((n))
 
-    # n, np, np_diff = samples[-1]
+    # n = samples[-1]
     # p = get_param_from_name(model_task.encoder, n)
-    # pg = get_param_from_name(model_gender.encoder, np)
-    # pa = get_param_from_name(model_age.encoder, np)
-    # pg_diff = get_param_from_name(model_gender.encoder, np_diff)
-    # pa_diff = get_param_from_name(model_age.encoder, np_diff)
+    # pg = get_param_from_name(model_gender.encoder, n)
+    # pa = get_param_from_name(model_age.encoder, n)
     # import IPython; IPython.embed(); exit(1)
     # # TEMP - for debugging
 

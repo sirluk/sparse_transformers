@@ -263,13 +263,13 @@ class AdvDiffModel(BasePruningModel):
         loss_fn: Callable,
         pred_fn: Callable,
         metrics: Dict[str, Callable],
-        label_idx: int = 1
+        label_idx: int = 0
     ) -> dict:
         self.eval()
 
-        if label_idx > 1:
-            desc = f"protected attribute {label_idx-2}"
-            forward_fn = lambda x: self.forward_protected(head_idx=label_idx-2, **x)
+        if label_idx > 0:
+            desc = f"protected attribute {label_idx-1}"
+            forward_fn = lambda x: self.forward_protected(head_idx=label_idx-1, **x)
         else:
             desc = "task"
             forward_fn = lambda x: self(**x)

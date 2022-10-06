@@ -13,7 +13,6 @@ from src.models.model_diff_adv import AdvDiffModel
 from src.models.model_diff_task import TaskDiffModel
 from src.models.model_adv import AdvModel
 from src.models.model_task import TaskModel
-from src.models.model_modular import ModularModel
 from src.training_logger import TrainLogger
 from src.utils import dict_to_device
 
@@ -25,7 +24,6 @@ AVAILABLE_MODEL_CLASSES = [
     AdvModel,
     TaskDiffModel,
     AdvDiffModel,
-    ModularModel,
     ModularDiffModel
 ]
 
@@ -144,8 +142,8 @@ def train_head(
     train_iterator = trange(num_epochs, desc=train_str.format(0, ""), leave=False, position=0)
     for epoch in train_iterator:
 
-        epoch_str = "training - step {}, loss: {:7.5f}"
-        epoch_iterator = tqdm(train_loader, desc=epoch_str.format(0, math.nan), leave=False, position=1)
+        epoch_str = "training {} - step {}, loss: {:7.5f}"
+        epoch_iterator = tqdm(train_loader, desc=epoch_str.format(desc, 0, math.nan), leave=False, position=1)
 
         for step, (inputs, labels) in enumerate(epoch_iterator):
 
@@ -161,7 +159,7 @@ def train_head(
 
             logger.step_loss(global_step, loss.item(), lr=lr, suffix=desc)
 
-            epoch_iterator.set_description(epoch_str.format(step, loss.item()), refresh=True)
+            epoch_iterator.set_description(epoch_str.format(desc, step, loss.item()), refresh=True)
 
             global_step += 1
 

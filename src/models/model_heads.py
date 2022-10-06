@@ -67,6 +67,10 @@ class ClfHead(nn.Module):
             if isinstance(module, nn.Linear):
                 module.reset_parameters()
 
+    def freeze_parameters(self, frozen: bool):
+        for p in self.parameters():
+            p.requires_grad = not frozen
+
 
 class AdvHead(nn.Module):
     def __init__(self, adv_count: int = 1, **kwargs):
@@ -111,38 +115,3 @@ class AdvHeadWrapper(nn.Module):
     def reset_parameters(self):
         for adv_head in self.adv_heads:
             adv_head.reset_parameters()
-
-
-class SwitchHead(nn.Module):
-    def __init__(self, switch: bool, head_cls: nn.Module, *args, **kwargs):
-        super().__init__()
-        self.switch = switch
-        self.active_head_idx = 0
-
-        self.heads = nn.ModuleList()
-        for _ in range(switch+1):
-            self.heads.append(head_cls(*args, **kwargs))
-
-    def switch_head(self, first: bool):
-        self.assert_switch(first)
-        self.active_head_idx = int(not first)
-
-    def freeze_parameters(self, first: bool, frozen: bool):
-        self.assert_switch(first)
-        for p in self.heads[int(not first)].parameters():
-            p.requires_grad = not frozen
-
-    def forward(self, x):
-        return self.heads[self.active_head_idx](x)
-
-    def forward_scaled(self, x):
-        x_ = GradScaler.apply(x, len(self.heads))
-        out = self(x_)
-        return GradScaler.apply(out, 1/len(self.heads))
-
-    def assert_switch(self, first: bool):
-        assert not ((not first) == len(self.heads)), "second head was selected but len(self.heads) is 1"
-
-    def reset_parameters(self):
-        for head in self.heads:
-            head.reset_parameters()

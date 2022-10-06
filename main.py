@@ -1,15 +1,13 @@
 import argparse
 import ruamel.yaml as yaml
 import torch
-from torch.utils.data import TensorDataset, DataLoader
 
 from src.models.model_diff_modular import ModularDiffModel
 from src.models.model_diff_adv import AdvDiffModel
 from src.models.model_diff_task import TaskDiffModel
 from src.models.model_adv import AdvModel
 from src.models.model_task import TaskModel
-from src.models.model_modular import ModularModel
-from src.model_functions import model_factory, generate_embeddings
+from src.model_functions import model_factory
 from src.adv_attack import run_adv_attack
 from src.data_handler import get_data
 from src.utils import (
@@ -191,6 +189,7 @@ def train_diff_pruning_modular(
         concrete_lower = args_train.concrete_lower,
         concrete_upper = args_train.concrete_upper,
         structured_diff_pruning = args_train.structured_diff_pruning,
+        adv_merged = args_train.modular_adv_merged,
         alpha_init = args_train.alpha_init,
         model_state_dict = encoder_state_dict
     )
@@ -346,71 +345,6 @@ def train_baseline_adv(
     return trainer
 
 
-def train_baseline_modular(
-    device,
-    train_loader,
-    val_loader,
-    num_labels,
-    num_labels_protected_list,
-    protected_key_list,
-    loss_fn,
-    pred_fn,
-    metrics,
-    loss_fn_protected_list,
-    pred_fn_protected_list,
-    metrics_protected_list,
-    train_logger,
-    args_train,
-    encoder_state_dict = None,
-    seed = None
-):
-
-    trainer = ModularModel(
-        model_name = args_train.model_name,
-        num_labels_task = num_labels,
-        num_labels_protected = num_labels_protected_list,
-        task_dropout = args_train.task_dropout,
-        task_n_hidden = args_train.task_n_hidden,
-        adv_dropout = args_train.adv_dropout,
-        adv_n_hidden = args_train.adv_n_hidden,
-        adv_count = args_train.adv_count,
-        adv_task_head = args_train.modular_adv_task_head,
-        bottleneck = args_train.bottleneck,
-        bottleneck_dim = args_train.bottleneck_dim,
-        bottleneck_dropout = args_train.bottleneck_dropout,
-        model_state_dict = encoder_state_dict
-    )
-    trainer.to(device)
-    trainer_cp = trainer.fit(
-        train_loader = train_loader,
-        val_loader = val_loader,
-        logger = train_logger,
-        loss_fn = loss_fn,
-        pred_fn = pred_fn,
-        metrics = metrics,
-        loss_fn_protected = loss_fn_protected_list,
-        pred_fn_protected = pred_fn_protected_list,
-        metrics_protected = metrics_protected_list,
-        num_epochs_warmup = args_train.num_epochs_warmup,
-        num_epochs = args_train.num_epochs,
-        adv_lambda = args_train.adv_lambda,
-        learning_rate = args_train.learning_rate,
-        learning_rate_bottleneck = args_train.learning_rate_bottleneck,
-        learning_rate_task_head = args_train.learning_rate_task_head,
-        learning_rate_adv_head = args_train.learning_rate_adv_head,
-        optimizer_warmup_steps = args_train.optimizer_warmup_steps,
-        max_grad_norm = args_train.max_grad_norm,
-        output_dir = args_train.output_dir,
-        protected_key = protected_key_list,
-        checkpoint_name = train_logger.logger_name + ".pt",
-        seed = seed
-    )
-    trainer = ModularModel.load_checkpoint(trainer_cp)
-    trainer.to(device)
-
-    return trainer
-
-
 def main():
 
     parser = argparse.ArgumentParser()
@@ -426,6 +360,7 @@ def main():
     parser.add_argument("--cp_modular_biased", action="store_true", help="If loading checkpoint from modular model set debiased state")
     parser.add_argument("--prot_key_idx", type=int, help="If protected key is type list: index of key to use, if none use all available attributes for taining")
     parser.add_argument("--debug", action="store_true", help="Whether to run on small subset for testing")
+    parser.add_argument("--logger_suffix", type=str, help="Add addtional string to logger name")
     base_args, optional = parser.parse_known_args()
 
     with open("cfg.yml", "r") as f:
@@ -440,6 +375,8 @@ def main():
         set_num_epochs_debug(args_train)
         set_num_epochs_debug(args_attack)
         set_dir_debug(args_train)
+
+    print(f"args_train:\n{args_train}")
 
     torch.manual_seed(base_args.seed)
     print(f"torch.manual_seed({base_args.seed})")
@@ -480,31 +417,32 @@ def main():
         prot_key_idx = base_args.prot_key_idx,
         seed = base_args.seed,
         debug = base_args.debug,
+        suffix = base_args.logger_suffix
     )
 
     print(f"Running {train_logger.logger_name}")
 
-    if base_args.baseline:
-        if base_args.modular:
-            trainer = train_baseline_modular(
-                device,
-                train_loader,
-                val_loader,
-                num_labels,
-                num_labels_protected_list,
-                protected_key_list,
-                loss_fn,
-                pred_fn,
-                metrics,
-                loss_fn_protected_list,
-                pred_fn_protected_list,
-                metrics_protected_list,
-                train_logger,
-                args_train,
-                encoder_state_dict,
-                base_args.seed
-            )
-        elif base_args.adv:
+    if base_args.modular:
+        trainer = train_diff_pruning_modular(
+            device,
+            train_loader,
+            val_loader,
+            num_labels,
+            num_labels_protected_list,
+            protected_key_list,
+            loss_fn,
+            pred_fn,
+            metrics,
+            loss_fn_protected_list,
+            pred_fn_protected_list,
+            metrics_protected_list,
+            train_logger,
+            args_train,
+            encoder_state_dict,
+            base_args.seed
+        )
+    elif base_args.baseline:
+        if base_args.adv:
             trainer = train_baseline_adv(
                 device,
                 train_loader,
@@ -538,26 +476,7 @@ def main():
                 base_args.seed
             )
     else:
-        if base_args.modular:
-            trainer = train_diff_pruning_modular(
-                device,
-                train_loader,
-                val_loader,
-                num_labels,
-                num_labels_protected_list,
-                protected_key_list,
-                loss_fn,
-                pred_fn,
-                metrics,
-                loss_fn_protected_list,
-                pred_fn_protected_list,
-                metrics_protected_list,
-                train_logger,
-                args_train,
-                encoder_state_dict,
-                base_args.seed
-            )
-        elif base_args.adv:
+        if base_args.adv:
             trainer = train_diff_pruning_adv(
                 device,
                 train_loader,
@@ -598,12 +517,7 @@ def main():
             args_train,
             args_attack,
             trainer,
-            train_logger,
-            train_loader, 
-            val_loader,
-            num_labels_protected_list,
-            protected_key_list,
-            protected_class_weights_list
+            train_logger
         )
 
 

@@ -163,7 +163,7 @@ class AdvModel(BaseModel):
                     loss_fn_prot,
                     pred_fn_prot,
                     metrics_prot,
-                    label_idx=i+2
+                    label_idx=i+1
                 )
                 results_protected.append((k, res_prot))
                 logger.validation_loss(epoch, res_prot, suffix=f"protected_{k}")
@@ -189,13 +189,13 @@ class AdvModel(BaseModel):
         loss_fn: Callable,
         pred_fn: Callable,
         metrics: Dict[str, Callable],
-        label_idx: int = 1
+        label_idx: int = 0
     ) -> dict:
         self.eval()
 
-        if label_idx > 1:
-            desc = f"protected attribute {label_idx-2}"
-            forward_fn = lambda x: self.forward_protected(head_idx=label_idx-2, **x)
+        if label_idx > 0:
+            desc = f"protected attribute {label_idx-1}"
+            forward_fn = lambda x: self.forward_protected(head_idx=label_idx-1, **x)
         else:
             desc = "task"
             forward_fn = lambda x: self(**x)

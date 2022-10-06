@@ -2,10 +2,12 @@
 test*.ipynb
 test*.py
 embeddings*
-logs*
 checkpoints*
+logs*
 DEBUG_checkpoints*
 DEBUG_logs*
+OLD_checkpoints*
+OLD_logs*
 analysis/charts/*
 analysis/data/*
 

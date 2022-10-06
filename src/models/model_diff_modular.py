@@ -9,13 +9,21 @@ from transformers import get_linear_schedule_with_warmup
 
 from typing import Union, Callable, Dict, Optional
 
-from src.models.model_heads import SwitchHead, AdvHead, ClfHead
+from src.models.model_heads import AdvHead, ClfHead
 from src.models.model_base import BasePruningModel
 from src.training_logger import TrainLogger
 from src.utils import dict_to_device
 
 
 class ModularDiffModel(BasePruningModel):
+
+    @property
+    def n_embeddings(self):
+        return 1 + max(1, (not self.adv_merged) * len(self.num_labels_protected))
+
+    @property
+    def _task_head_idx(self):
+        return self.adv_task_head*self._debiased*(1+self._debiased_par_idx)
 
     def __init__(
         self,
@@ -36,6 +44,7 @@ class ModularDiffModel(BasePruningModel):
         concrete_lower: Optional[float] = -1.5,
         concrete_upper: Optional[float] = 1.5,
         structured_diff_pruning: Optional[bool] = True,
+        adv_merged: bool = True,
         alpha_init: Optional[Union[int, float]] = 5,
         **kwargs
     ):
@@ -59,26 +68,33 @@ class ModularDiffModel(BasePruningModel):
         self.concrete_lower = concrete_lower
         self.concrete_upper = concrete_upper
         self.structured_diff_pruning = structured_diff_pruning
-        
+        self.adv_merged = adv_merged
+
         # bottleneck layer
+        n_bottleneck = 1 + max(1, (not adv_merged) * len(num_labels_protected))
         if self.has_bottleneck:
-            self.bottleneck = SwitchHead(True, ClfHead, self.hidden_size, bottleneck_dim, dropout=bottleneck_dropout)
+            self.bottleneck = torch.nn.ModuleList([
+                ClfHead(hid_sizes=self.hidden_size, num_labels=bottleneck_dim, dropout=bottleneck_dropout) for _ in range(n_bottleneck)
+            ])
             self.in_size_heads = bottleneck_dim
         else:
-            self.bottleneck = SwitchHead(True, torch.nn.Identity)
+            self.bottleneck = torch.nn.ModuleList([torch.nn.Identity() for _ in range(n_bottleneck)])
             self.in_size_heads = self.hidden_size
 
-        # heads
-        self.task_head = SwitchHead(adv_task_head, ClfHead, [self.in_size_heads]*(task_n_hidden+1), num_labels_task, dropout=task_dropout)
+        # task head
+        n_task_head = 1 + adv_task_head * max(1, (not adv_merged) * len(num_labels_protected))
+        self.task_head = torch.nn.ModuleList([
+            ClfHead(hid_sizes=[self.in_size_heads]*(task_n_hidden+1), num_labels=num_labels_task, dropout=task_dropout) for _ in range(n_task_head)
+        ])             
 
-        self.adv_head = torch.nn.ModuleList()
-        for n in num_labels_protected:
-            self.adv_head.append(
-                AdvHead(adv_count, hid_sizes=[self.in_size_heads]*(adv_n_hidden+1), num_labels=n, dropout=adv_dropout)
-            )
+        # adv head
+        self.adv_head = torch.nn.ModuleList([
+            AdvHead(adv_count, hid_sizes=[self.in_size_heads]*(adv_n_hidden+1), num_labels=n, dropout=adv_dropout) for n in num_labels_protected
+        ])
 
+        n_parametrizations = sparse_task + max(1, (not adv_merged) * len(num_labels_protected))
         self._add_diff_parametrizations(
-            n_parametrizations = 1 + sparse_task,
+            n_parametrizations = n_parametrizations,
             p_requires_grad = not sparse_task,
             fixmask_init = fixmask_init,
             alpha_init = alpha_init,
@@ -92,10 +108,11 @@ class ModularDiffModel(BasePruningModel):
 
     def _forward(self, **x) -> torch.Tensor:
         hidden = super()._forward(**x)
-        return self.bottleneck(hidden)
+        idx = self._debiased*(1+self._debiased_par_idx)
+        return self.bottleneck[idx](hidden)
 
     def forward(self, **x) -> torch.Tensor:
-        return self.task_head(self._forward(**x))
+        return self.task_head[self._task_head_idx](self._forward(**x))
 
     def forward_protected(self, head_idx=0, **x) -> torch.Tensor:
         return self.adv_head[head_idx](self._forward(**x))
@@ -145,6 +162,8 @@ class ModularDiffModel(BasePruningModel):
             metrics_protected = [metrics_protected]
         if not isinstance(protected_key, (list, tuple)):
             protected_key = [protected_key]
+        if protected_key[0] is None:
+            protected_key = list(range(len(protected_key)))
 
         assert self.finetune_state or (self.fixmask_state and num_epochs_finetune==0), \
             "model is in fixmask state but num_epochs_fintune>0"
@@ -192,9 +211,10 @@ class ModularDiffModel(BasePruningModel):
 
             # switch to fixed mask training
             if epoch == num_epochs_finetune:
+                sequential = [True] * self.sparse_task + [False] + [False] * (self.n_parametrizations-self.sparse_task-1) * (not self.adv_merged)
                 self._finetune_to_fixmask(
                     fixmask_pct,
-                    n_parametrizations = (1 + self.sparse_task),
+                    sequential = sequential,
                     merged_cutoff = merged_cutoff,
                     merged_min_pct = merged_min_pct
                 )
@@ -221,52 +241,60 @@ class ModularDiffModel(BasePruningModel):
                 concrete_samples
             )
 
-            result = self.evaluate(
-                val_loader,
-                loss_fn,
-                pred_fn,
-                metrics
-            )
-            logger.validation_loss(epoch, result, "task")
-
-            result_debiased = self.evaluate(
-                val_loader,
-                loss_fn,
-                pred_fn,
-                metrics,
-                debiased=True
-            )
-            logger.validation_loss(epoch, result_debiased, suffix="task_debiased")
+            results_task= []
+            for i in range(self.n_embeddings):
+                k_debiased_idx = max(0,i-1)
+                res_task = self.evaluate(
+                    val_loader,
+                    loss_fn,
+                    pred_fn,
+                    metrics,
+                    label_idx=0,
+                    debiased=bool(i),
+                    debiased_par_idx=k_debiased_idx
+                )
+                if i == 0:
+                    k = "task"
+                elif i > 0 and self.adv_merged:
+                    k = "task_debiased"
+                else:
+                    k = f"task_debiased_{protected_key[k_debiased_idx]}"
+                results_task.append((k, res_task))
+                logger.validation_loss(epoch, res_task, suffix=k)
 
             results_protected = []
             for i, (prot_key, loss_fn_prot, pred_fn_prot, metrics_prot) in enumerate(zip(
                 protected_key, loss_fn_protected, pred_fn_protected, metrics_protected
             )):
-                k = str(prot_key if prot_key is not None else i)
+                k = f"protected_{prot_key}"
                 res_prot = self.evaluate(
                     val_loader,
                     loss_fn_prot,
                     pred_fn_prot,
                     metrics_prot,
-                    label_idx=i+2,
-                    debiased=True
+                    label_idx=i+1,
+                    debiased=True,
+                    debiased_par_idx=i
                 )
                 results_protected.append((k, res_prot))
-                logger.validation_loss(epoch, res_prot, suffix=f"protected_{k}")
+                logger.validation_loss(epoch, res_prot, suffix=k)
 
             # count non zero
-            mask_names = ["task", "adv"]
+            mask_names = ["task"]
+            if self.adv_merged:
+                mask_names.append("adv")
+            else:
+                mask_names.extend([f"adv_{k}" for k in protected_key])           
             for i, suffix in enumerate(mask_names[(not self.sparse_task):]):
-                n_p, n_p_zero, n_p_one = self._count_non_zero_params(i)
+                n_p, n_p_zero, n_p_one = self._count_non_zero_params(idx = i)
                 n_p_between = n_p - (n_p_zero + n_p_one)
                 logger.non_zero_params(epoch, n_p, n_p_zero, n_p_between, suffix)
 
-            result_strings = [
-                str_suffix(result, "_task"),
-                str_suffix(result_debiased, "_task_debiased")
-            ]
+            result_strings = []
+            for (k, r) in results_task:
+                result_strings.append(str_suffix(r, f"_{k}"))
             for (k, r) in results_protected:
-                result_strings.append(str_suffix(r, f"_protected_{k}"))
+                result_strings.append(str_suffix(r, f"_{k}"))
             result_str = ", ".join(result_strings)
 
             train_iterator.set_description(
@@ -280,7 +308,7 @@ class ModularDiffModel(BasePruningModel):
                     seed
                 )
 
-        self.set_debiased(True) # make sure debiasing is active at end of training
+        self.set_debiased(False) # deactivate debiasing at end of training
 
         print("Final results after " + train_str.format(epoch, self.model_state, result_str))
 
@@ -294,24 +322,23 @@ class ModularDiffModel(BasePruningModel):
         loss_fn: Callable,
         pred_fn: Callable,
         metrics: Dict[str, Callable],
-        label_idx: int = 1,
-        debiased: bool = False
+        label_idx: int = 0,
+        debiased: bool = False,
+        debiased_par_idx: int = 0
     ) -> dict:
         self.eval()
 
-        if label_idx > 1:
-            desc = f"protected attribute {label_idx-2}"
-            forward_fn = lambda x: self.forward_protected(head_idx=label_idx-2, **x)
+        if label_idx > 0:
+            desc = f"protected attribute {label_idx-1}"
+            forward_fn = lambda x: self.forward_protected(head_idx=label_idx-1, **x)
         else:
             desc = "task"
             forward_fn = lambda x: self(**x)
 
-        if debiased != self._debiased:
-            self.set_debiased(debiased, grad_switch=False)
-            result = self._evaluate(val_loader, forward_fn, loss_fn, pred_fn, metrics, label_idx, desc)
-            self.set_debiased((not debiased), grad_switch=False)
-        else:
-            result = self._evaluate(val_loader, forward_fn, loss_fn, pred_fn, metrics, label_idx, desc)
+        idx_before = self._debiased_par_idx
+        self.set_debiased(debiased, grad_switch=False, debiased_par_idx=debiased_par_idx)
+        result = self._evaluate(val_loader, forward_fn, loss_fn, pred_fn, metrics, label_idx, desc)
+        self.set_debiased((not debiased), grad_switch=False, debiased_par_idx=idx_before)
 
         return result
 
@@ -324,7 +351,7 @@ class ModularDiffModel(BasePruningModel):
         log_ratio: float,
         sparsity_pen: list,
         max_grad_norm: float,
-        loss_fn_protected: Union[Callable, list, tuple],
+        loss_fn_protected: Union[list, tuple],
         adv_lambda: float,
         concrete_samples: int
     ) -> None:
@@ -354,11 +381,10 @@ class ModularDiffModel(BasePruningModel):
                 loss_task = loss_fn(outputs, labels_task.to(self.device))
                 loss_biased += loss_task
 
+                loss_l0 = torch.tensor(0.)
                 if self.finetune_state and self.sparse_task:
                     loss_l0 = self._get_sparsity_loss(log_ratio, sparsity_pen, 0)
                     loss_biased += loss_l0
-                else:
-                    loss_l0 = torch.tensor(0.)
 
                 partial_losses_biased += torch.tensor([loss_task, loss_l0]).detach()
 
@@ -377,39 +403,96 @@ class ModularDiffModel(BasePruningModel):
 
             ##################################################
             # START STEP DEBIAS
-            self.set_debiased(True)
 
-            loss_debiased = 0.
-            partial_losses_debiased = torch.zeros((3,))
-            for _ in range(concrete_samples):
+            if self.adv_merged:
 
-                hidden = self._forward(**inputs)
-                outputs_task = self.task_head(hidden)
-                loss_task_adv = loss_fn(outputs_task, labels_task.to(self.device))
-                loss_debiased += loss_task_adv
+                self.set_debiased(True)    
 
-                for i, (l, loss_fn_prot) in enumerate(zip(labels_protected, loss_fn_protected)):
-                    outputs_protected = self.adv_head[i].forward_reverse(hidden, lmbda = adv_lambda)
-                    loss_protected = self._get_mean_loss(outputs_protected, l.to(self.device), loss_fn_prot)
-                    loss_debiased += loss_protected
+                loss_debiased = 0.
+                partial_losses_debiased = torch.zeros((3,))
 
-                if self.finetune_state:
-                    loss_l0_adv = self._get_sparsity_loss(log_ratio, sparsity_pen, int(self.sparse_task))
-                    loss_debiased += loss_l0_adv
-                else:
+                for _ in range(concrete_samples):
+
+                    hidden = self._forward(**inputs)
+
+                    outputs_task = self.task_head[self._task_head_idx](hidden)
+                    loss_task_adv = loss_fn(outputs_task, labels_task.to(self.device))
+                    loss_debiased += loss_task_adv
+
+                    loss_protected = 0.
+                    for i, (l, loss_fn_prot) in enumerate(zip(labels_protected, loss_fn_protected)):
+                        outputs_protected = self.adv_head[i].forward_reverse(hidden, lmbda = adv_lambda)
+                        loss_protected += self._get_mean_loss(outputs_protected, l.to(self.device), loss_fn_prot)
+                        loss_debiased += loss_protected
+
                     loss_l0_adv = torch.tensor(0.)
+                    if self.finetune_state:
+                        loss_l0_adv = self._get_sparsity_loss(log_ratio, sparsity_pen, int(self.sparse_task))
+                        loss_debiased += loss_l0_adv   
 
-                partial_losses_debiased += torch.tensor([loss_task_adv, loss_protected, loss_l0_adv]).detach()
+                    partial_losses_debiased += torch.tensor([loss_task_adv, loss_protected, loss_l0_adv]).detach()
 
-            loss_debiased /= concrete_samples
-            partial_losses_debiased /= concrete_samples
+                loss_debiased /= concrete_samples
+                partial_losses_debiased /= concrete_samples
 
-            loss_debiased.backward()
+                loss_debiased.backward()
 
-            torch.nn.utils.clip_grad_norm_(self.parameters(), max_grad_norm)
+                losses_debiased_dict = {
+                    "total_adv": loss_debiased.item(),
+                    "task_adv": partial_losses_debiased[0],
+                    "protected": partial_losses_debiased[1],
+                    "l0_adv": partial_losses_debiased[2]
+                }
 
-            self.optimizer.step()
-            self.zero_grad()
+            else:     
+
+                losses_debiased_dict = {}   
+
+                for debiased_par_idx in range(self.n_parametrizations-self.sparse_task):
+
+                    self.set_debiased(True, debiased_par_idx=debiased_par_idx)
+                
+                    loss_debiased = 0.
+                    partial_losses_debiased = torch.zeros((3,))
+
+                    for _ in range(concrete_samples):
+
+                        hidden = self._forward(**inputs)
+
+                        outputs_task = self.task_head[self._task_head_idx](hidden)
+                        loss_task_adv = loss_fn(outputs_task, labels_task.to(self.device))
+                        loss_debiased += loss_task_adv
+
+                        l = labels_protected[debiased_par_idx]
+                        loss_fn_prot = loss_fn_protected[debiased_par_idx]
+                        outputs_protected = self.adv_head[debiased_par_idx].forward_reverse(hidden, lmbda = adv_lambda)
+                        loss_protected = self._get_mean_loss(outputs_protected, l.to(self.device), loss_fn_prot)
+                        loss_debiased += loss_protected
+
+                        loss_l0_adv = torch.tensor(0.)
+                        if self.finetune_state:
+                            loss_l0_adv = self._get_sparsity_loss(log_ratio, sparsity_pen, int(self.sparse_task))
+                            loss_debiased += loss_l0_adv
+
+                        partial_losses_debiased += torch.tensor([loss_task_adv, loss_protected, loss_l0_adv]).detach()
+
+                    loss_debiased /= concrete_samples
+                    partial_losses_debiased /= concrete_samples
+
+                    loss_debiased.backward()
+
+                    losses_debiased_dict = {
+                        **losses_debiased_dict,
+                        f"total_adv_{debiased_par_idx}": loss_debiased.item(),
+                        f"task_adv_{debiased_par_idx}": partial_losses_debiased[0],
+                        f"protected_{debiased_par_idx}": partial_losses_debiased[1],
+                        f"l0_adv_{debiased_par_idx}": partial_losses_debiased[2]
+                    }
+
+                torch.nn.utils.clip_grad_norm_(self.parameters(), max_grad_norm)
+
+                self.optimizer.step()
+                self.zero_grad()
 
             # END STEP DEBIAS
             ##################################################
@@ -421,10 +504,7 @@ class ModularDiffModel(BasePruningModel):
                 "total_biased": loss_biased.item(),
                 "task": partial_losses_biased[0],
                 "l0": partial_losses_biased[1],
-                "total_adv": loss_debiased.item(),
-                "task_adv": partial_losses_debiased[0],
-                "protected": partial_losses_debiased[1],
-                "l0_adv": partial_losses_debiased[2]
+                **losses_debiased_dict
             }
             logger.step_loss(self.global_step, losses_dict)
 
@@ -433,24 +513,32 @@ class ModularDiffModel(BasePruningModel):
             self.global_step += 1
 
 
-    def set_debiased(self, debiased: bool, grad_switch: bool = True) -> None:
+    def set_debiased(self, debiased: bool, grad_switch: bool = True, debiased_par_idx: int = 0) -> None:
         try:
-            check = (debiased != self._debiased)
+            check_debiased = (debiased != self._debiased)
         except AttributeError:
-            check = True
-        if check:
-            self._activate_parametrizations(debiased, int(self.sparse_task))
-            self.bottleneck.switch_head(not debiased)
-            if self.adv_task_head:
-                self.task_head.switch_head(not debiased)
-            if grad_switch:
-                if not self.adv_task_head:
-                    self.task_head.freeze_parameters(first=True, frozen=debiased)
-                if self.sparse_task:
-                    self._freeze_parametrizations(debiased, 0)
-                else:
-                    self._freeze_original_parameters(debiased)
+            check_debiased = True
+
+        debiased_par_idx *= (not self.adv_merged)
+        try:
+            check_idx = (debiased_par_idx != self._debiased_par_idx)
+        except AttributeError:
+            check_idx = True
+
+        if check_debiased and grad_switch:
+            if not self.adv_task_head:
+                self.task_head[0](frozen=debiased)
+            if self.sparse_task:
+                self._freeze_parametrizations(debiased, 0)
+            else:
+                self._freeze_original_parameters(debiased)
+        if check_debiased or check_idx:
+            for i in range(self.n_parametrizations-self.sparse_task):
+                active = bool(debiased * (i==debiased_par_idx))
+                self._activate_parametrizations(active, idx=i)
             self._debiased = debiased
+            self._debiased_par_idx = debiased_par_idx
+            
 
 
     def _init_optimizer_and_schedule(
@@ -542,7 +630,8 @@ class ModularDiffModel(BasePruningModel):
             "sparse_task": self.sparse_task,
             "concrete_lower": self.concrete_lower,
             "concrete_upper": self.concrete_upper,
-            "structured_diff_pruning": self.structured_diff_pruning
+            "structured_diff_pruning": self.structured_diff_pruning,
+            "adv_merged": self.adv_merged
         }
 
         output_dir = Path(output_dir)
@@ -560,6 +649,7 @@ class ModularDiffModel(BasePruningModel):
         filepath: Union[str, os.PathLike],
         remove_parametrizations: bool = False,
         debiased: bool = True,
+        debiased_par_idx: int = 0,
         map_location: Union[str, torch.device] = torch.device('cpu')
     ) -> torch.nn.Module:
         info_dict = torch.load(filepath, map_location=map_location)
@@ -582,6 +672,7 @@ class ModularDiffModel(BasePruningModel):
             concrete_lower = info_dict['concrete_lower'],
             concrete_upper = info_dict['concrete_upper'],
             structured_diff_pruning = info_dict['structured_diff_pruning'],
+            adv_merged = info_dict['adv_merged'],
             alpha_init = 5
         )
 
@@ -590,7 +681,7 @@ class ModularDiffModel(BasePruningModel):
         cls_instance.task_head.load_state_dict(info_dict['task_head_state_dict'])
         cls_instance.adv_head.load_state_dict(info_dict['adv_head_state_dict'])
 
-        cls_instance.set_debiased(debiased)
+        cls_instance.set_debiased(debiased, debiased_par_idx=debiased_par_idx)
 
         if remove_parametrizations:
             cls_instance._remove_parametrizations()

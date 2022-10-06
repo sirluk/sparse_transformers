@@ -11,7 +11,6 @@ from src.models.model_diff_adv import AdvDiffModel
 from src.models.model_diff_task import TaskDiffModel
 from src.models.model_adv import AdvModel
 from src.models.model_task import TaskModel
-from src.models.model_modular import ModularModel
 
 
 PATH = "/share/home/lukash/pan16/bertl4/cp"
@@ -20,8 +19,7 @@ CLS_MAP = {
     AdvModel: re.compile(r"adverserial-baseline"),
     TaskDiffModel: re.compile(r"task-diff_pruning"),
     AdvDiffModel: re.compile(r"adverserial-diff_pruning"),
-    ModularModel: re.compile(r"modular-.*-baseline"),
-    ModularDiffModel: re.compile(r"modular-.*-diff_pruning")
+    ModularDiffModel: re.compile(r"modular")
 }
 
 experiments = os.listdir(PATH)

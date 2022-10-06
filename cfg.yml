@@ -41,6 +41,7 @@ model_config:
 train_config:
     weighted_loss_protected: True
     bottleneck: False
+    unstructured_diff_pruning: True
     structured_diff_pruning: True
     alpha_init: 5
     concrete_samples: 1
@@ -70,12 +71,13 @@ train_config:
     fixmask_pct: 0.1
     logging_step: 5
     cooldown: 5
-    modular_sparse_task: True
-    modular_adv_task_head: False
+    modular_sparse_task: False
+    modular_adv_task_head: True
     modular_merged_cutoff: False
     modular_merged_min_pct: 0.01
+    modular_adv_merged: False
 adv_attack:
-    num_epochs: 100
+    num_epochs: 40
     learning_rate: 1e-4
     adv_n_hidden: 1
     adv_count: 5

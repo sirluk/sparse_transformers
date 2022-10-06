@@ -69,10 +69,7 @@ def get_name_for_run(
     run_parts = ["DEBUG" if debug else None]
 
     if modular:
-        run_parts.extend([
-            "modular",
-            "merged_head" if not args_train.modular_adv_task_head else None
-    ])
+        run_parts.append("modular")
     elif adv:
         run_parts.append("adverserial")
     else:
@@ -85,11 +82,14 @@ def get_name_for_run(
             f"diff_pruning_{args_train.fixmask_pct if args_train.num_epochs_fixmask>0 else 'no_fixmask'}",
             f"a_samples_{args_train.concrete_samples}" if args_train.concrete_samples > 1 else None
         ])
-        if modular:
-            run_parts.extend([
-                "sparse_task" if args_train.modular_sparse_task else None,
-                "merged_cutoff" if args_train.modular_merged_cutoff else None
-            ])
+
+    if modular:
+        run_parts.extend([
+            "merged_head" if not args_train.modular_adv_task_head else None,
+            "sparse_task" if args_train.modular_sparse_task else None,
+            "adv_merged" if args_train.modular_adv_merged else None,
+            "merged_cutoff" if args_train.modular_merged_cutoff else None
+        ])
 
     if isinstance(args_train.protected_key, str):
         prot_attr = args_train.protected_key

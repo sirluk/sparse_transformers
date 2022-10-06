@@ -81,75 +81,96 @@ def run_adv_attack(
     args_train,
     args_attack,
     trainer,
-    train_logger,
-    train_loader,
-    val_loader,
-    num_labels_protected,
-    protected_key,
-    protected_class_weights
+    train_logger
 ):
 
-    args_train_prot_key_islist = isinstance(args_train.protected_key, (list, tuple))
-    args_train_prot_key_len = len(args_train.protected_key)
-    prot_key_islist = isinstance(protected_key, (list, tuple))
-    prot_key_len = len(protected_key)
-    
-    gen_loaders = args_train_prot_key_islist and (
-        (not prot_key_islist and args_train_prot_key_len>1) or
-        (prot_key_islist and prot_key_len!=args_train_prot_key_len)
+    train_loader, val_loader, _, num_labels_protected, protected_key, protected_class_weights = get_data(
+        args_train,
+        use_all_attr = True,
+        compute_class_weights = args_train.weighted_loss_protected,
+        device = trainer.device,
+        debug = base_args.debug
     )
-    if gen_loaders:
-        train_loader, val_loader, _, num_labels_protected, protected_key, protected_class_weights = get_data(
-            args_train,
-            use_all_attr = True,
-            compute_class_weights = args_train.weighted_loss_protected,
-            device = trainer.device,
-            debug = base_args.debug
-        )
-    train_data = generate_embeddings(trainer, train_loader, forward_fn = lambda m, x: m._forward(**x))
-    val_data = generate_embeddings(trainer, val_loader, forward_fn = lambda m, x: m._forward(**x))
 
-    if not prot_key_islist:
-        num_labels_protected = [num_labels_protected]
-        protected_key = [protected_key]
-        protected_class_weights = [protected_class_weights]
+    if base_args.modular:
+        train_data = []
+        val_data = []
+        for i in range(trainer.n_embeddings):
+            trainer.set_debiased(bool(i), debiased_par_idx=max(0,i-1))
+            train_data.append(generate_embeddings(trainer, train_loader, forward_fn = lambda m, x: m._forward(**x)))
+            val_data.append(generate_embeddings(trainer, val_loader, forward_fn = lambda m, x: m._forward(**x)))
+    else:
+        train_data = generate_embeddings(trainer, train_loader, forward_fn = lambda m, x: m._forward(**x))
+        val_data = generate_embeddings(trainer, val_loader, forward_fn = lambda m, x: m._forward(**x))
+
 
     for (i, (num_lbl_prot, prot_k, prot_w)) in enumerate(zip(num_labels_protected, protected_key, protected_class_weights)):
 
         label_idx = i+2
-
-        train_loader = DataLoader(
-            TensorDataset(train_data[0], train_data[label_idx]), shuffle=True, batch_size=args_attack.attack_batch_size, drop_last=False
-        )
-        val_loader = DataLoader(
-            TensorDataset(val_data[0], val_data[label_idx]), shuffle=False, batch_size=args_attack.attack_batch_size, drop_last=False
-        )
-
-        debiased_embeddings = (base_args.adv or base_args.modular) and ((i == base_args.prot_key_idx) or (base_args.prot_key_idx is None))
-
         loss_fn, pred_fn, metrics = get_callables(num_lbl_prot, class_weights = prot_w)
-        adv_attack(
-            trainer = trainer,
-            train_loader = train_loader,
-            val_loader = val_loader,
-            logger = train_logger,
-            loss_fn = loss_fn,
-            pred_fn = pred_fn,
-            metrics = metrics,
-            num_labels = num_lbl_prot,
-            adv_n_hidden = args_attack.adv_n_hidden,
-            adv_count = args_attack.adv_count,
-            adv_dropout = args_attack.adv_dropout,
-            num_epochs = args_attack.num_epochs,
-            lr = args_attack.learning_rate,
-            cooldown = args_attack.cooldown,
-            create_hidden_dataloader = False,
-            batch_size = args_attack.attack_batch_size,
-            label_idx = label_idx,
-            logger_suffix = f"adv_attack{'_debiased' if debiased_embeddings else ''}_{prot_k}"
-        )
+
         if base_args.modular:
-            trainer.set_debiased(False)
+            for emb_idx, (td, tv) in enumerate(zip(train_data, val_data)):
+                
+                train_loader = DataLoader(
+                    TensorDataset(td[0], td[label_idx]), shuffle=True, batch_size=args_attack.attack_batch_size, drop_last=False
+                )
+                val_loader = DataLoader(
+                    TensorDataset(tv[0], tv[label_idx]), shuffle=False, batch_size=args_attack.attack_batch_size, drop_last=False
+                )
+
+                if emb_idx == 0:
+                    emb_name = "task_emb"
+                elif base_args.prot_key_idx is None:
+                    emb_name = "adv_emb_all" if trainer.adv_merged else f"adv_emb_{protected_key[emb_idx-1]}"
+                else:
+                    emb_name = f"adv_emb_{protected_key[base_args.prot_key_idx]}"
+                
+                # if trainer.adv_merged:
+                #     debiased_embeddings = (emb_idx == 1) and ((i == base_args.prot_key_idx) or (base_args.prot_key_idx is None))
+                # else:
+                #     debiased_embeddings = ((i == base_args.prot_key_idx) and (emb_idx == 1)) or ((base_args.prot_key_idx is None) and (i == emb_idx-1))
+                # deb_name = f"target_key_{prot_k}" if debiased_embeddings else prot_k
+                
+                adv_attack(
+                    trainer = trainer,
+                    train_loader = train_loader,
+                    val_loader = val_loader,
+                    logger = train_logger,
+                    loss_fn = loss_fn,
+                    pred_fn = pred_fn,
+                    metrics = metrics,
+                    num_labels = num_lbl_prot,
+                    adv_n_hidden = args_attack.adv_n_hidden,
+                    adv_count = args_attack.adv_count,
+                    adv_dropout = args_attack.adv_dropout,
+                    num_epochs = args_attack.num_epochs,
+                    lr = args_attack.learning_rate,
+                    cooldown = args_attack.cooldown,
+                    create_hidden_dataloader = False,
+                    batch_size = args_attack.attack_batch_size,
+                    label_idx = label_idx,
+                    logger_suffix = "_".join(["adv_attack", emb_name, f"target_key_{prot_k}"])
+                )
+        else:
+
+            train_loader = DataLoader(
+                TensorDataset(train_data[0], train_data[label_idx]), shuffle=True, batch_size=args_attack.attack_batch_size, drop_last=False
+            )
+            val_loader = DataLoader(
+                TensorDataset(val_data[0], val_data[label_idx]), shuffle=False, batch_size=args_attack.attack_batch_size, drop_last=False
+            )
+
+            if not base_args.adv:
+                emb_name = "task_emb"
+            elif base_args.prot_key_idx is None:
+                emb_name = f"adv_emb_all"
+            else:
+                emb_name = f"adv_emb_{protected_key[base_args.prot_key_idx]}"
+
+            # debiased_embeddings = base_args.adv and ((i == base_args.prot_key_idx) or (base_args.prot_key_idx is None))
+            # deb_name = f"debiased_{prot_k}" if debiased_embeddings else prot_k
+
             adv_attack(
                 trainer = trainer,
                 train_loader = train_loader,
@@ -168,5 +189,5 @@ def run_adv_attack(
                 create_hidden_dataloader = False,
                 batch_size = args_attack.attack_batch_size,
                 label_idx = label_idx,
-                logger_suffix = f"adv_attack_{prot_k}"
+                logger_suffix = "_".join(["adv_attack", emb_name, f"target_key_{prot_k}"])
             )

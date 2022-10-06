@@ -1,7 +1,6 @@
 import sys
 sys.path.insert(0,'..')
 
-import os
 import argparse
 import ruamel.yaml as yaml
 import torch
@@ -11,25 +10,22 @@ from src.models.model_diff_adv import AdvDiffModel
 from src.models.model_diff_task import TaskDiffModel
 from src.models.model_adv import AdvModel
 from src.models.model_task import TaskModel
-from src.models.model_modular import ModularModel
 from src.utils import get_logger_custom, set_optional_args, get_callables
 from src.data_handler import get_data
 from src.adv_attack import adv_attack
 
 
 def get_model_cls(cp_name: str):
-    if "baseline" in cp_name:
+    if "modular" in cp_name:
+        return ModularDiffModel
+    elif "baseline" in cp_name:
         if "adv" in cp_name:
             return AdvModel
-        elif "modular" in cp_name:
-            return ModularModel
         else:
             return TaskModel
     else:
         if "adv" in cp_name:
             return AdvDiffModel
-        elif "modular" in cp_name:
-            return ModularDiffModel
         else:
             return TaskDiffModel
 

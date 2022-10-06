@@ -15,7 +15,7 @@ from src.models.model_diff_task import TaskDiffModel
 from src.models.model_diff_modular import ModularDiffModel
 from src.models.model_adv import AdvModel
 from src.models.model_task import TaskModel
-from src.models.model_modular import ModularModel
+from OLD_scripts.model_modular import ModularModel
 from src.utils import (
     get_device,
     get_data,
