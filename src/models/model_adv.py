@@ -109,6 +109,8 @@ class AdvModel(BaseModel):
             metrics_protected = [metrics_protected]
         if not isinstance(protected_key, (list, tuple)):
             protected_key = [protected_key]
+        if protected_key[0] is None:
+            protected_key = list(range(len(protected_key)))
 
         self.global_step = 0
         num_epochs_total = num_epochs + num_epochs_warmup
@@ -157,7 +159,7 @@ class AdvModel(BaseModel):
             for i, (prot_key, loss_fn_prot, pred_fn_prot, metrics_prot) in enumerate(zip(
                 protected_key, loss_fn_protected, pred_fn_protected, metrics_protected
             )):
-                k = str(prot_key if prot_key is not None else i)
+                k = f"protected_{prot_key}"
                 res_prot = self.evaluate(
                     val_loader,
                     loss_fn_prot,
@@ -166,11 +168,12 @@ class AdvModel(BaseModel):
                     label_idx=i+1
                 )
                 results_protected.append((k, res_prot))
-                logger.validation_loss(epoch, res_prot, suffix=f"protected_{k}")
+                logger.validation_loss(epoch, res_prot, suffix=k)
 
-            result_strings = [str_suffix(result, "_task_debiased")]
+            result_name = "_task_debiased" if len(protected_key)>1 else f"_task_debiased_{protected_key[0]}"
+            result_strings = [str_suffix(result, result_name)]
             for (k, r) in results_protected:
-                result_strings.append(str_suffix(r, f"_protected_{k}"))
+                result_strings.append(str_suffix(r, f"_{k}"))
             result_str = ", ".join(result_strings)
 
             train_iterator.set_description(train_str.format(epoch, result_str), refresh=True)
@@ -209,7 +212,7 @@ class AdvModel(BaseModel):
         loss_fn: Callable,
         logger: TrainLogger,
         max_grad_norm: float,
-        loss_fn_protected: Union[Callable, list, tuple],
+        loss_fn_protected: Union[list, tuple],
         adv_lambda: float
     ) -> None:
         self.train()

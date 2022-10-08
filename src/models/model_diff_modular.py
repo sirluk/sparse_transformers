@@ -154,6 +154,9 @@ class ModularDiffModel(BasePruningModel):
         seed: Optional[int] = None
     ) -> None:
 
+        assert self.finetune_state or (self.fixmask_state and num_epochs_finetune==0), \
+            "model is in fixmask state but num_epochs_fintune>0"
+
         if not isinstance(loss_fn_protected, (list, tuple)):
             loss_fn_protected = [loss_fn_protected]
         if not isinstance(pred_fn_protected, (list, tuple)):
@@ -164,9 +167,6 @@ class ModularDiffModel(BasePruningModel):
             protected_key = [protected_key]
         if protected_key[0] is None:
             protected_key = list(range(len(protected_key)))
-
-        assert self.finetune_state or (self.fixmask_state and num_epochs_finetune==0), \
-            "model is in fixmask state but num_epochs_fintune>0"
 
         self.global_step = 0
         num_epochs_finetune += num_epochs_warmup
@@ -395,8 +395,12 @@ class ModularDiffModel(BasePruningModel):
 
             torch.nn.utils.clip_grad_norm_(self.parameters(), max_grad_norm)
 
-            self.optimizer.step()
-            self.zero_grad()
+            self.optimizer_task.step()
+            self.optimizer_task.zero_grad()
+
+            # pnames, params = zip(*[(n,p) for n,p in self.encoder.named_parameters() if n[-9:] == f".original"])
+            # rand_idx = [torch.randperm(p.numel())[0].item() for p in params]
+            # rand_params = torch.stack([p.view(-1)[i].detach() for p,i in zip(params, rand_idx)])
 
             # END STEP TASK
             ##################################################
@@ -444,6 +448,11 @@ class ModularDiffModel(BasePruningModel):
                     "l0_adv": partial_losses_debiased[2]
                 }
 
+                torch.nn.utils.clip_grad_norm_(self.parameters(), max_grad_norm)
+
+                self.optimizers_adv[0].step()
+                self.optimizers_adv[0].zero_grad()
+
             else:     
 
                 losses_debiased_dict = {}   
@@ -489,10 +498,14 @@ class ModularDiffModel(BasePruningModel):
                         f"l0_adv_{debiased_par_idx}": partial_losses_debiased[2]
                     }
 
-                torch.nn.utils.clip_grad_norm_(self.parameters(), max_grad_norm)
+                    torch.nn.utils.clip_grad_norm_(self.parameters(), max_grad_norm)
 
-                self.optimizer.step()
-                self.zero_grad()
+                    self.optimizers_adv[debiased_par_idx].step()
+                    self.optimizers_adv[debiased_par_idx].zero_grad()
+
+            # pnames_after, params_after = zip(*[(n,p) for n,p in self.encoder.named_parameters() if n[-9:] == f".original"])
+            # rand_params_after = torch.stack([p.view(-1)[i].detach() for p,i in zip(params_after, rand_idx)])
+            #assert torch.equal(rand_params, rand_params_after)
 
             # END STEP DEBIAS
             ##################################################
@@ -538,7 +551,53 @@ class ModularDiffModel(BasePruningModel):
                 self._activate_parametrizations(active, idx=i)
             self._debiased = debiased
             self._debiased_par_idx = debiased_par_idx
-            
+
+
+    # def _init_optimizer_and_schedule(
+    #     self,
+    #     num_training_steps: int,
+    #     learning_rate: float,
+    #     learning_rate_task_head: float,
+    #     learning_rate_adv_head: float,
+    #     learning_rate_alpha: float,
+    #     learning_rate_bottleneck: float = 1e-4,
+    #     weight_decay: float = 0.0,
+    #     num_warmup_steps: int = 0
+    # ) -> None:
+
+    #     optimizer_param_groups = [
+    #         {
+    #             "params": self.bottleneck.parameters(),
+    #             "lr": learning_rate_bottleneck
+    #         },
+    #         {
+    #             "params": self.task_head.parameters(),
+    #             "lr": learning_rate_task_head
+    #         },
+    #         {
+    #             "params": self.adv_head.parameters(),
+    #             "lr": learning_rate_adv_head
+    #         }
+    #     ]
+
+    #     optimizer_param_groups.extend(
+    #         self._get_diff_param_groups(learning_rate, weight_decay, learning_rate_alpha)
+    #     )
+
+    #     if not self.sparse_task:
+    #         optimizer_param_groups.append(
+    #             {
+    #                 "params": [p for n,p in self.encoder.named_parameters() if n[-9:] == f".original"],
+    #                 "lr": learning_rate,
+    #                 "weight_decay": weight_decay
+    #             }
+    #         )
+
+    #     self.optimizer = AdamW(optimizer_param_groups, betas=(0.9, 0.999), eps=1e-08)
+
+    #     # self.scheduler = get_linear_schedule_with_warmup(
+    #     #     self.optimizer, num_warmup_steps=num_warmup_steps, num_training_steps=num_training_steps
+    #     # )
 
 
     def _init_optimizer_and_schedule(
@@ -553,27 +612,24 @@ class ModularDiffModel(BasePruningModel):
         num_warmup_steps: int = 0
     ) -> None:
 
-        optimizer_param_groups = [
+        # task params
+        task_optimizer_param_groups = [
             {
-                "params": self.bottleneck.parameters(),
+                "params": self.bottleneck[0].parameters(),
                 "lr": learning_rate_bottleneck
             },
             {
-                "params": self.task_head.parameters(),
+                "params": self.task_head[0].parameters(),
                 "lr": learning_rate_task_head
-            },
-            {
-                "params": self.adv_head.parameters(),
-                "lr": learning_rate_adv_head
             }
         ]
 
-        optimizer_param_groups.extend(
-            self._get_diff_param_groups(learning_rate, weight_decay, learning_rate_alpha)
-        )
-
-        if not self.sparse_task:
-            optimizer_param_groups.append(
+        if self.sparse_task:
+            task_optimizer_param_groups.extend(
+                self._get_diff_param_groups(learning_rate, weight_decay, learning_rate_alpha, 0)
+            )
+        else:
+            task_optimizer_param_groups.append(
                 {
                     "params": [p for n,p in self.encoder.named_parameters() if n[-9:] == f".original"],
                     "lr": learning_rate,
@@ -581,7 +637,37 @@ class ModularDiffModel(BasePruningModel):
                 }
             )
 
-        self.optimizer = AdamW(optimizer_param_groups, betas=(0.9, 0.999), eps=1e-08)
+        self.optimizer_task = AdamW(task_optimizer_param_groups, betas=(0.9, 0.999), eps=1e-08)
+
+        # adv params
+        self.optimizers_adv = []
+        
+        for i in range(self.sparse_task, self.n_parametrizations):
+            
+            adv_optimizer_param_groups = [
+                {
+                    "params": self.bottleneck[i].parameters(),
+                    "lr": learning_rate_bottleneck
+                },
+                {
+                    "params": self.adv_head[i-self.sparse_task].parameters(),
+                    "lr": learning_rate_adv_head
+                }
+            ]
+
+            if self.adv_task_head:
+                {
+                    "params": self.task_head[i-self.sparse_task+1].parameters(),
+                    "lr": learning_rate_task_head
+                },
+
+            adv_optimizer_param_groups.extend(
+                self._get_diff_param_groups(learning_rate, weight_decay, learning_rate_alpha, idx=i)
+            )
+
+            self.optimizers_adv.append(
+                AdamW(adv_optimizer_param_groups, betas=(0.9, 0.999), eps=1e-08)
+            )
 
         # self.scheduler = get_linear_schedule_with_warmup(
         #     self.optimizer, num_warmup_steps=num_warmup_steps, num_training_steps=num_training_steps
@@ -672,8 +758,7 @@ class ModularDiffModel(BasePruningModel):
             concrete_lower = info_dict['concrete_lower'],
             concrete_upper = info_dict['concrete_upper'],
             structured_diff_pruning = info_dict['structured_diff_pruning'],
-            adv_merged = info_dict['adv_merged'],
-            alpha_init = 5
+            adv_merged = info_dict['adv_merged']
         )
 
         cls_instance.encoder.load_state_dict(info_dict['encoder_state_dict'])

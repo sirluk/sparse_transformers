@@ -1,12 +1,20 @@
 import os
 import argparse
 from pathlib import Path
+from functools import reduce
 import torch
 
 from typing import Union, List, Tuple, Callable, Dict, Optional
 
 from src.training_logger import TrainLogger
 from src.metrics import accuracy
+
+
+def get_param_from_name(
+    model: torch.nn.Module,
+    param_name: str
+):
+    return reduce(lambda a,b: getattr(a,b), [model] + param_name.split("."))
 
 
 def concrete_stretched(

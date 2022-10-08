@@ -14,7 +14,7 @@ from collections import OrderedDict
 from typing import Union, List, Tuple, Optional, Dict, Callable
 
 from src.models.weight_parametrizations import DiffWeightFinetune, DiffWeightFixmask
-from src.utils import dict_to_device
+from src.utils import dict_to_device, get_param_from_name
 
 
 class ModelState(Enum):
@@ -547,3 +547,26 @@ class BasePruningModel(BaseModel):
             return self._as_module(res)
         else:
             return res
+
+
+    @torch.no_grad()
+    def load_state_dict_to_parametrizations(
+        self,
+        model_state_dict: OrderedDict,
+        idx: int = 0
+    ):
+        assert not any([("parametrizations" in k) for k in model_state_dict.keys()]), "cant use parametrized state dict"
+
+        for k,v in model_state_dict.items():
+            k_parts = k.split(".")
+            if (k_parts[-1] == "weight") or (k_parts[-1] == "bias"):
+                m = get_param_from_name(self.encoder, ".".join(k_parts[:-1]))
+                if isinstance(m, DiffWeightFinetune):
+                    pname = ".".join(["parametrizations", k_parts[-1], str(idx), "finetune"])
+                    p = get_param_from_name(m, pname)
+                    p.copy_(v)
+                elif isinstance(m, DiffWeightFixmask):
+                    par_list = m.parametrizations
+                    diff = v - par_list.original
+                    par = get_param_from_name(par_list, ".".join([k_parts[-1], str(idx)]))
+                    par.diff_weight.copy_(par.mask * diff)

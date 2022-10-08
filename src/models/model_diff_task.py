@@ -6,6 +6,7 @@ import torch
 from torch.utils.data import DataLoader
 from torch.optim import AdamW
 from transformers import get_linear_schedule_with_warmup
+from collections import OrderedDict
 
 from typing import Union, Callable, Dict, Optional
 
@@ -31,9 +32,14 @@ class TaskDiffModel(BasePruningModel):
         concrete_upper: Optional[float] = 1.5,
         structured_diff_pruning: Optional[bool] = True,
         alpha_init: Optional[Union[int, float]] = 5,
+        encoder_state_dict: OrderedDict = None,
+        state_dict_load_to_par: bool = False,
         **kwargs
     ):
-        super().__init__(model_name, **kwargs)
+        if (encoder_state_dict is not None) and (not state_dict_load_to_par):
+            super().__init__(model_name, **kwargs)
+        else:
+            super().__init__(model_name, model_state_dict=encoder_state_dict, **kwargs)
 
         self.num_labels = num_labels
         self.dropout = dropout
@@ -64,6 +70,10 @@ class TaskDiffModel(BasePruningModel):
             concrete_upper = concrete_upper,
             structured = structured_diff_pruning
         )
+
+        if encoder_state_dict is not None and state_dict_load_to_par:
+            self.load_state_dict_to_parametrizations(encoder_state_dict)
+            
 
     def _forward(self, **x) -> torch.Tensor:
         hidden = super()._forward(**x)
@@ -248,11 +258,10 @@ class TaskDiffModel(BasePruningModel):
                 loss_task = loss_fn(outputs, labels.to(self.device))
                 loss += loss_task
 
+                loss_l0 = torch.tensor(0.)
                 if self.finetune_state:
                     loss_l0 = self._get_sparsity_loss(log_ratio, sparsity_pen, 0)
                     loss += loss_l0
-                else:
-                    loss_l0 = torch.tensor(0.)
 
                 partial_losses += torch.tensor([loss_task, loss_l0]).detach()
 
@@ -378,8 +387,7 @@ class TaskDiffModel(BasePruningModel):
             fixmask_init = info_dict['fixmask'],
             concrete_lower = info_dict['concrete_lower'],
             concrete_upper = info_dict['concrete_upper'],
-            structured_diff_pruning = info_dict['structured_diff_pruning'],
-            alpha_init = 5
+            structured_diff_pruning = info_dict['structured_diff_pruning']
         )
 
         cls_instance.encoder.load_state_dict(info_dict['encoder_state_dict'])

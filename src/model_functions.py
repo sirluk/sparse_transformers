@@ -1,6 +1,5 @@
 import math
 from pathlib import Path
-from functools import reduce
 from copy import deepcopy
 from tqdm import tqdm, trange
 import torch
@@ -14,7 +13,7 @@ from src.models.model_diff_task import TaskDiffModel
 from src.models.model_adv import AdvModel
 from src.models.model_task import TaskModel
 from src.training_logger import TrainLogger
-from src.utils import dict_to_device
+from src.utils import dict_to_device, get_param_from_name
 
 from typing import Optional, Union, Callable, Dict
 
@@ -28,12 +27,8 @@ AVAILABLE_MODEL_CLASSES = [
 ]
 
 
-def get_param_from_name(model, param_name):
-    return reduce(lambda a,b: getattr(a,b), [model] + param_name.split("."))
-
-
 @torch.no_grad()
-def merge_models(model_list: list) -> torch.nn.Module:
+def merge_models(*model_list) -> torch.nn.Module:
     # assert all weights match
     sets = [set([n for n, _ in m.named_parameters()]) for m in model_list]
     try:
@@ -52,6 +47,19 @@ def merge_models(model_list: list) -> torch.nn.Module:
             p += p_add
 
     return model_frame
+
+
+@torch.no_grad()
+def merge_adv_models(
+    *adv_model_list
+):
+    diff_weights = [m.get_diff_weights(0, as_module=True) for m in adv_model_list]
+    base_weights = adv_model_list[0].get_base_weights(as_module=True)
+    for p_name, p in base_weights.named_parameters():
+        for dw in diff_weights:
+            p_add = get_param_from_name(dw, p_name)
+            p += (p_add / len(diff_weights))
+    return base_weights
 
 
 @torch.no_grad()

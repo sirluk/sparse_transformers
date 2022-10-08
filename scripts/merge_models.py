@@ -12,29 +12,25 @@ from src.models.model_task import TaskModel
 from src.models.model_diff_modular import ModularDiffModel
 from src.models.model_heads import ClfHead
 from src.models.model_base import BaseModel
-from src.model_functions import merge_diff_models, train_head, merge_models
+from src.model_functions import train_head, merge_adv_models
 from src.adv_attack import adv_attack
 from src.data_handler import get_data
 from src.model_functions import generate_embeddings
 from src.utils import get_logger_custom, get_callables
 
 DEBUG = False
-GPU_ID = 0
+GPU_ID = 2
 SEED = 0
 DEVICE = f"cuda:{GPU_ID}" if torch.cuda.is_available() else "cpu"
 DS = "pan16"
-LOG_DIR = "logs_merged_masks_modular"
+LOG_DIR = "logs_merged_masks_adv"
 LOGGER_NAME = "seed{}".format(SEED)
 MODEL_ADV_CLS = AdvDiffModel
 MODEL_TASK_CLS = TaskModel
 CP = {
-    "modular": "../checkpoints_pan16/modular-diff_pruning_0.1-bert_uncased_L-4_H-256_A-4-64-2e-05-weighted_loss_prot-gender_age-seed{}.pt".format(SEED)
+    "adv_gender": "/share/rk7/home/lukash/sparse_transformers/checkpoints_pan16/adverserial-diff_pruning_0.1-bert_uncased_L-4_H-256_A-4-64-2e-05-weighted_loss_prot-gender-seed0.pt",
+    "adv_age": "/share/rk3/home/lukash/sparse_transformers/checkpoints_pan16/adverserial-diff_pruning_0.1-bert_uncased_L-4_H-256_A-4-64-2e-05-weighted_loss_prot-age-seed0.pt"
 }
-# CP = {
-#     "task": "/share/home/lukash/pan16/bertl4/cp/task-baseline-bert_uncased_L-4_H-256_A-4-64-2e-05-seed{}.pt".format(SEED),
-#     "gender": "/share/home/lukash/pan16/bertl4/cp/adverserial-diff_pruning_0.1-bert_uncased_L-4_H-256_A-4-64-2e-05-weighted_loss_prot-gender-seed{}.pt".format(SEED),
-#     "age": "/share/home/lukash/pan16/bertl4/cp/adverserial-diff_pruning_0.1-bert_uncased_L-4_H-256_A-4-64-2e-05-weighted_loss_prot-age-seed{}.pt".format(SEED)
-# }
 
 
 def main():
@@ -42,35 +38,23 @@ def main():
     torch.manual_seed(SEED)
     print(f"torch.manual_seed({SEED})")
 
-    modular_model = ModularDiffModel.load_checkpoint(CP["modular"])
-    model_task = modular_model.get_base_weights(as_module=True)
-    model_gender = modular_model.get_diff_weights(idx=0, as_module=True)
-    model_age = modular_model.get_diff_weights(idx=1, as_module=True)
-    model_list = []
-    for m in [model_task, model_gender, model_age]:
-        model_list.append(BaseModel(modular_model.model_name, m.state_dict()))
-    model = merge_models(model_list)
-
-    # model_gender = MODEL_ADV_CLS.load_checkpoint(CP["gender"])
-    # model_age = MODEL_ADV_CLS.load_checkpoint(CP["age"])
-    # if "task" in CP:
-    #     model_task = MODEL_TASK_CLS.load_checkpoint(CP["task"])
-    #     model = merge_diff_models([model_gender, model_age], base_model=model_task)
-    # else:
-    #     model = merge_diff_models([model_gender, model_age])
+    model_gender = AdvDiffModel.load_checkpoint(CP["adv_gender"])
+    model_age = AdvDiffModel.load_checkpoint(CP["adv_age"])
+    model = merge_adv_models(model_gender, model_age)
+    model = BaseModel(model_gender.model_name, model.state_dict())
 
     # # TEMP - for debugging
     # from src.model_functions import get_param_from_name
     
     # samples = []
-    # for n, p in model_task.encoder.named_parameters():
+    # for n, p in model.encoder.named_parameters():
     #     pg_diff = get_param_from_name(model_gender.encoder, n)
     #     pa_diff = get_param_from_name(model_age.encoder, n)
-    #     if p.flatten()[1] != pg_diff.flatten()[1] != pa_diff.flatten()[1]:
+    #     if pg_diff.flatten()[1] != pa_diff.flatten()[1]:
     #         samples.append((n))
 
     # n = samples[-1]
-    # p = get_param_from_name(model_task.encoder, n)
+    # p = get_param_from_name(model.encoder, n)
     # pg = get_param_from_name(model_gender.encoder, n)
     # pa = get_param_from_name(model_age.encoder, n)
     # import IPython; IPython.embed(); exit(1)
@@ -159,6 +143,7 @@ def main():
             lr = args_attack.learning_rate,
             cooldown = args_attack.cooldown,
             create_hidden_dataloader = False,
+            batch_size = args_attack.attack_batch_size,
             label_idx = label_idx,
             logger_suffix = f"adv_attack_{prot_k}"
         )

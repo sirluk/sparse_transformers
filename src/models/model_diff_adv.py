@@ -6,6 +6,7 @@ import torch
 from torch.utils.data import DataLoader
 from torch.optim import AdamW
 from transformers import get_linear_schedule_with_warmup
+from collections import OrderedDict
 
 from typing import Union, Callable, Dict, Optional
 
@@ -35,9 +36,14 @@ class AdvDiffModel(BasePruningModel):
         concrete_upper: Optional[float] = 1.5,
         structured_diff_pruning: Optional[bool] = True,
         alpha_init: Optional[Union[int, float]] = 5,
+        encoder_state_dict: OrderedDict = None,
+        state_dict_load_to_par: bool = False,
         **kwargs
     ):
-        super().__init__(model_name, **kwargs)
+        if (encoder_state_dict is not None) and (not state_dict_load_to_par):
+            super().__init__(model_name, **kwargs)
+        else:
+            super().__init__(model_name, model_state_dict=encoder_state_dict, **kwargs)
 
         if isinstance(num_labels_protected, int):
             num_labels_protected = [num_labels_protected]
@@ -82,6 +88,10 @@ class AdvDiffModel(BasePruningModel):
             concrete_upper = concrete_upper,
             structured = structured_diff_pruning
         )
+
+        if encoder_state_dict is not None and state_dict_load_to_par:
+            self.load_state_dict_to_parametrizations(encoder_state_dict)
+
 
     def _forward(self, **x) -> torch.Tensor:
         hidden = super()._forward(**x)
@@ -139,6 +149,8 @@ class AdvDiffModel(BasePruningModel):
             metrics_protected = [metrics_protected]
         if not isinstance(protected_key, (list, tuple)):
             protected_key = [protected_key]
+        if protected_key[0] is None:
+            protected_key = list(range(len(protected_key)))
 
         self.global_step = 0
         num_epochs_finetune += num_epochs_warmup
@@ -219,25 +231,26 @@ class AdvDiffModel(BasePruningModel):
             for i, (prot_key, loss_fn_prot, pred_fn_prot, metrics_prot) in enumerate(zip(
                 protected_key, loss_fn_protected, pred_fn_protected, metrics_protected
             )):
-                k = str(prot_key if prot_key is not None else i)
+                k = f"protected_{prot_key}"
                 res_prot = self.evaluate(
                     val_loader,
                     loss_fn_prot,
                     pred_fn_prot,
                     metrics_prot,
-                    label_idx=i+2
+                    label_idx=i+1
                 )
                 results_protected.append((k, res_prot))
-                logger.validation_loss(epoch, res_prot, suffix=f"protected_{k}")
+                logger.validation_loss(epoch, res_prot, suffix=k)
 
             # count non zero
             n_p, n_p_zero, n_p_one = self._count_non_zero_params()
             n_p_between = n_p - (n_p_zero + n_p_one)
             logger.non_zero_params(epoch, n_p, n_p_zero, n_p_between, "adv")
 
-            result_strings = [str_suffix(result, "_task_debiased")]
+            result_name = "_task_debiased" if len(protected_key)>1 else f"_task_debiased_{protected_key[0]}"
+            result_strings = [str_suffix(result, result_name)]
             for (k, r) in results_protected:
-                result_strings.append(str_suffix(r, f"_protected_{k}"))
+                result_strings.append(str_suffix(r, f"_{k}"))
             result_str = ", ".join(result_strings)
 
             train_iterator.set_description(
@@ -285,7 +298,7 @@ class AdvDiffModel(BasePruningModel):
         log_ratio: float,
         sparsity_pen: list,
         max_grad_norm: float,
-        loss_fn_protected: Union[Callable, list, tuple],
+        loss_fn_protected: Union[list, tuple],
         adv_lambda: float,
         concrete_samples: int
     ) -> None:
@@ -316,11 +329,10 @@ class AdvDiffModel(BasePruningModel):
                     loss_protected = self._get_mean_loss(outputs_protected, l.to(self.device), loss_fn_prot)
                     loss += loss_protected
 
+                loss_l0 = torch.tensor(0.)
                 if self.finetune_state:
                     loss_l0 = self._get_sparsity_loss(log_ratio, sparsity_pen, 0)
                     loss += loss_l0
-                else:
-                    loss_l0 = torch.tensor(0.)
 
                 partial_losses += torch.tensor([loss_task, loss_protected, loss_l0]).detach()
 
@@ -462,8 +474,7 @@ class AdvDiffModel(BasePruningModel):
             fixmask_init = info_dict['fixmask'],
             concrete_lower = info_dict['concrete_lower'],
             concrete_upper = info_dict['concrete_upper'],
-            structured_diff_pruning = info_dict['structured_diff_pruning'],
-            alpha_init = 5
+            structured_diff_pruning = info_dict['structured_diff_pruning']
         )
 
         cls_instance.encoder.load_state_dict(info_dict['encoder_state_dict'])
