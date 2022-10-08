@@ -63,12 +63,12 @@ class BaseModel(torch.nn.Module):
         raise Exception("number of layers of pre trained model could not be determined")
 
 
-    def __init__(self, model_name: str, model_state_dict: OrderedDict = None, **kwargs):
+    def __init__(self, model_name: str, encoder_state_dict: OrderedDict = None, **kwargs):
         super().__init__()
         self.encoder = AutoModel.from_pretrained(model_name, **kwargs)
 
-        if model_state_dict is not None:
-            self.encoder.load_state_dict(model_state_dict)
+        if encoder_state_dict is not None:
+            self.encoder.load_state_dict(encoder_state_dict)
             self.state_dict_init = True
         else:
             self.state_dict_init = False
@@ -552,12 +552,12 @@ class BasePruningModel(BaseModel):
     @torch.no_grad()
     def load_state_dict_to_parametrizations(
         self,
-        model_state_dict: OrderedDict,
+        encoder_state_dict: OrderedDict,
         idx: int = 0
     ):
-        assert not any([("parametrizations" in k) for k in model_state_dict.keys()]), "cant use parametrized state dict"
+        assert not any([("parametrizations" in k) for k in encoder_state_dict.keys()]), "cant use parametrized state dict"
 
-        for k,v in model_state_dict.items():
+        for k,v in encoder_state_dict.items():
             k_parts = k.split(".")
             if (k_parts[-1] == "weight") or (k_parts[-1] == "bias"):
                 m = get_param_from_name(self.encoder, ".".join(k_parts[:-1]))

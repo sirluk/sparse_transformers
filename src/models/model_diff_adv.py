@@ -43,7 +43,7 @@ class AdvDiffModel(BasePruningModel):
         if (encoder_state_dict is not None) and (not state_dict_load_to_par):
             super().__init__(model_name, **kwargs)
         else:
-            super().__init__(model_name, model_state_dict=encoder_state_dict, **kwargs)
+            super().__init__(model_name, encoder_state_dict=encoder_state_dict, **kwargs)
 
         if isinstance(num_labels_protected, int):
             num_labels_protected = [num_labels_protected]

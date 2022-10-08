@@ -46,7 +46,7 @@ def train_diff_pruning_task(
         concrete_upper = args_train.concrete_upper,
         structured_diff_pruning = args_train.structured_diff_pruning,
         alpha_init = args_train.alpha_init,
-        model_state_dict = encoder_state_dict
+        encoder_state_dict = encoder_state_dict
     )
     trainer.to(device)
     trainer_cp = trainer.fit(
@@ -114,7 +114,7 @@ def train_diff_pruning_adv(
         concrete_upper = args_train.concrete_upper,
         structured_diff_pruning = args_train.structured_diff_pruning,
         alpha_init = args_train.alpha_init,
-        model_state_dict = encoder_state_dict
+        encoder_state_dict = encoder_state_dict
     )
     trainer.to(device)
     trainer_cp = trainer.fit(
@@ -191,7 +191,7 @@ def train_diff_pruning_modular(
         structured_diff_pruning = args_train.structured_diff_pruning,
         adv_merged = args_train.modular_adv_merged,
         alpha_init = args_train.alpha_init,
-        model_state_dict = encoder_state_dict
+        encoder_state_dict = encoder_state_dict
     )
     trainer.to(device)
     trainer_cp = trainer.fit(
@@ -254,7 +254,7 @@ def train_baseline_task(
         bottleneck = args_train.bottleneck,
         bottleneck_dim = args_train.bottleneck_dim,
         bottleneck_dropout = args_train.bottleneck_dropout,
-        model_state_dict = encoder_state_dict
+        encoder_state_dict = encoder_state_dict
     )
     trainer.to(device)
     trainer_cp = trainer.fit(
@@ -312,7 +312,7 @@ def train_baseline_adv(
         bottleneck = args_train.bottleneck,
         bottleneck_dim = args_train.bottleneck_dim,
         bottleneck_dropout = args_train.bottleneck_dropout,
-        model_state_dict = encoder_state_dict
+        encoder_state_dict = encoder_state_dict
     )
     trainer.to(device)
     trainer_cp = trainer.fit(
