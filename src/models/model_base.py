@@ -559,14 +559,13 @@ class BasePruningModel(BaseModel):
 
         for k,v in encoder_state_dict.items():
             k_parts = k.split(".")
-            if (k_parts[-1] == "weight") or (k_parts[-1] == "bias"):
-                m = get_param_from_name(self.encoder, ".".join(k_parts[:-1]))
-                if isinstance(m, DiffWeightFinetune):
-                    pname = ".".join(["parametrizations", k_parts[-1], str(idx), "finetune"])
-                    p = get_param_from_name(m, pname)
-                    p.copy_(v)
-                elif isinstance(m, DiffWeightFixmask):
-                    par_list = m.parametrizations
-                    diff = v - par_list.original
-                    par = get_param_from_name(par_list, ".".join([k_parts[-1], str(idx)]))
-                    par.diff_weight.copy_(par.mask * diff)
+            try:
+                par_list = get_param_from_name(self.encoder, ".".join(k_parts[:-1] + ["parametrizations"]))
+            except:
+                continue
+            par = get_param_from_name(par_list, ".".join([k_parts[-1], str(idx)]))
+            if isinstance(par, DiffWeightFinetune):
+                par.finetune.copy_(v)
+            elif isinstance(par, DiffWeightFixmask):
+                diff = v - par_list.original
+                par.diff_weight.copy_(par.mask * diff)

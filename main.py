@@ -31,6 +31,7 @@ def train_diff_pruning_task(
     train_logger,
     args_train,
     encoder_state_dict = None,
+    cp_load_to_par = False,
     seed = None
 ):
 
@@ -46,7 +47,8 @@ def train_diff_pruning_task(
         concrete_upper = args_train.concrete_upper,
         structured_diff_pruning = args_train.structured_diff_pruning,
         alpha_init = args_train.alpha_init,
-        encoder_state_dict = encoder_state_dict
+        encoder_state_dict = encoder_state_dict,
+        state_dict_load_to_par = cp_load_to_par
     )
     trainer.to(device)
     trainer_cp = trainer.fit(
@@ -95,6 +97,7 @@ def train_diff_pruning_adv(
     train_logger,
     args_train,
     encoder_state_dict = None,
+    cp_load_to_par = False,
     seed = None
 ):
 
@@ -114,7 +117,8 @@ def train_diff_pruning_adv(
         concrete_upper = args_train.concrete_upper,
         structured_diff_pruning = args_train.structured_diff_pruning,
         alpha_init = args_train.alpha_init,
-        encoder_state_dict = encoder_state_dict
+        encoder_state_dict = encoder_state_dict,
+        state_dict_load_to_par = cp_load_to_par
     )
     trainer.to(device)
     trainer_cp = trainer.fit(
@@ -358,6 +362,7 @@ def main():
     parser.add_argument("--no_adv_attack", action="store_true", help="Set if you do not want to run adverserial attack after training")
     parser.add_argument("--cp_path", type=str, help="Overwrite pre-trained encoder weights")
     parser.add_argument("--cp_modular_biased", action="store_true", help="If loading checkpoint from modular model set debiased state")
+    parser.add_argument("--cp_load_to_par", action="store_true", help="initialize checkpoint weights in parametrizations (doesent work for modular model)")
     parser.add_argument("--prot_key_idx", type=int, help="If protected key is type list: index of key to use, if none use all available attributes for taining")
     parser.add_argument("--debug", action="store_true", help="Whether to run on small subset for testing")
     parser.add_argument("--logger_suffix", type=str, help="Add addtional string to logger name")
@@ -493,6 +498,7 @@ def main():
                 train_logger,
                 args_train,
                 encoder_state_dict,
+                base_args.cp_load_to_par,
                 base_args.seed
             )
         else:
@@ -507,6 +513,7 @@ def main():
                 train_logger,
                 args_train,
                 encoder_state_dict,
+                base_args.cp_load_to_par,
                 base_args.seed
             )
 
