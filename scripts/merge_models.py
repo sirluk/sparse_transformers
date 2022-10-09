@@ -12,25 +12,55 @@ from src.models.model_task import TaskModel
 from src.models.model_diff_modular import ModularDiffModel
 from src.models.model_heads import ClfHead
 from src.models.model_base import BaseModel
-from src.model_functions import train_head, merge_adv_models
+from src.model_functions import train_head, merge_adv_models, merge_modular_model
 from src.adv_attack import adv_attack
 from src.data_handler import get_data
 from src.model_functions import generate_embeddings
-from src.utils import get_logger_custom, get_callables
+from src.utils import get_logger_custom, get_callables, get_param_from_name
 
 DEBUG = False
-GPU_ID = 2
+GPU_ID = 0
 SEED = 0
 DEVICE = f"cuda:{GPU_ID}" if torch.cuda.is_available() else "cpu"
 DS = "pan16"
-LOG_DIR = "logs_merged_masks_adv"
-LOGGER_NAME = "seed{}".format(SEED)
+LOG_DIR = "logs_merged_masks"
+LOGGER_NAME = "adv_seed{}".format(SEED)
 MODEL_ADV_CLS = AdvDiffModel
 MODEL_TASK_CLS = TaskModel
 CP = {
-    "adv_gender": "/share/rk7/home/lukash/sparse_transformers/checkpoints_pan16/adverserial-diff_pruning_0.1-bert_uncased_L-4_H-256_A-4-64-2e-05-weighted_loss_prot-gender-seed0.pt",
-    "adv_age": "/share/rk3/home/lukash/sparse_transformers/checkpoints_pan16/adverserial-diff_pruning_0.1-bert_uncased_L-4_H-256_A-4-64-2e-05-weighted_loss_prot-age-seed0.pt"
+    "task_model": f"/share/home/lukash/pan16/bertl4/cp/task-baseline-bert_uncased_L-4_H-256_A-4-64-2e-05-weighted_loss_prot-seed{SEED}.pt",
+    "adv_gender": f"/share/home/lukash/pan16/bertl4/cp_cp_init/adverserial-diff_pruning_0.05-bert_uncased_L-4_H-256_A-4-64-2e-05-cp_init-weighted_loss_prot-gender-seed{SEED}.pt",
+    "adv_age": f"/share/home/lukash/pan16/bertl4/cp_cp_init/adverserial-diff_pruning_0.05-bert_uncased_L-4_H-256_A-4-64-2e-05-cp_init-weighted_loss_prot-age-seed{SEED}.pt"
 }
+# CP = {
+#     "modular_model": f"/share/home/lukash/pan16/bertl4/cp_special/modular-diff_pruning_0.1-bert_uncased_L-4_H-256_A-4-64-2e-05-weighted_loss_prot-gender_age-seed{SEED}-separate_optim.pt"
+# }
+
+
+def merge_adv_models_wrapper(cp_gender, cp_age, cp_base = None):
+
+    if cp_base is None:
+        model_gender = AdvDiffModel.load_checkpoint(cp_gender)
+        model_age = AdvDiffModel.load_checkpoint(cp_age)
+        model = merge_adv_models(model_gender, model_age)
+        return BaseModel(model_gender.model_name, model.state_dict())
+    else:
+        model_gender = AdvDiffModel.load_checkpoint(cp_gender, remove_parametrizations=True)
+        model_age = AdvDiffModel.load_checkpoint(cp_age, remove_parametrizations=True)
+        model_task = TaskModel.load_checkpoint(cp_base)
+        base_weights = model_task.encoder
+        with torch.no_grad():
+            for n, p in base_weights.named_parameters():
+                p_gender = get_param_from_name(model_gender.encoder, n)
+                p_age = get_param_from_name(model_age.encoder, n)
+                p = p_gender + p_age - p
+        return BaseModel(model_gender.model_name, base_weights.state_dict())
+
+
+def merge_modular_models_wrapper(cp_modular):
+    modular_model = ModularDiffModel.load_checkpoint(cp_modular)
+    model = merge_modular_model(modular_model)
+    return BaseModel(modular_model.model_name, model.state_dict())
 
 
 def main():
@@ -38,10 +68,8 @@ def main():
     torch.manual_seed(SEED)
     print(f"torch.manual_seed({SEED})")
 
-    model_gender = AdvDiffModel.load_checkpoint(CP["adv_gender"])
-    model_age = AdvDiffModel.load_checkpoint(CP["adv_age"])
-    model = merge_adv_models(model_gender, model_age)
-    model = BaseModel(model_gender.model_name, model.state_dict())
+    model = merge_adv_models_wrapper(CP["adv_gender"], CP["adv_age"]) # , cp_base=CP["task_model"]
+    # model = merge_modular_models_wrapper(CP["modular_model"]) # , cp_base=CP["task_model"]
 
     # # TEMP - for debugging
     # from src.model_functions import get_param_from_name

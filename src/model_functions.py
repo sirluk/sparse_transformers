@@ -63,6 +63,23 @@ def merge_adv_models(
 
 
 @torch.no_grad()
+def merge_modular_model(
+    modular_model
+):
+    diff_weights = []
+    for i in range(modular_model.sparse_task, modular_model.n_parametrizations):
+        diff_weights.append(
+            modular_model.get_diff_weights(i, as_module=True)
+        )
+    if modular_model.sparse_task:
+        base_weights = modular_model.get_diff_weights(0, as_module=True)
+    else:
+        base_weights = modular_model.get_base_weights(as_module=True)
+
+    return merge_models(base_weights, *diff_weights)
+
+
+@torch.no_grad()
 def merge_diff_models(
     diff_model_list: list,
     base_model: Optional[torch.nn.Module] = None,
