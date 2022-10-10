@@ -112,7 +112,7 @@ def get_name_for_run(
         str(args_train.batch_size),
         str(args_train.learning_rate),
         "cp_init" if cp_path else None,
-        "weighted_loss_prot" if args_train.weighted_loss_protected else None,
+        "weighted_loss_prot" if args_train.weighted_loss_protected and (adv or modular) else None,
         prot_attr if (adv or modular) else None,
         f"seed{seed}" if seed is not None else None,
         suffix,
