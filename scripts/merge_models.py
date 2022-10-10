@@ -24,16 +24,16 @@ SEED = 0
 DEVICE = f"cuda:{GPU_ID}" if torch.cuda.is_available() else "cpu"
 DS = "pan16"
 LOG_DIR = "logs_merged_masks"
-LOGGER_NAME = "adv_seed{}".format(SEED)
+LOGGER_NAME = "adv_0.1_seed{}".format(SEED)
 MODEL_ADV_CLS = AdvDiffModel
 MODEL_TASK_CLS = TaskModel
 CP = {
     "task_model": f"/share/home/lukash/pan16/bertl4/cp/task-baseline-bert_uncased_L-4_H-256_A-4-64-2e-05-weighted_loss_prot-seed{SEED}.pt",
-    "adv_gender": f"/share/home/lukash/pan16/bertl4/cp_cp_init/adverserial-diff_pruning_0.05-bert_uncased_L-4_H-256_A-4-64-2e-05-cp_init-weighted_loss_prot-gender-seed{SEED}.pt",
-    "adv_age": f"/share/home/lukash/pan16/bertl4/cp_cp_init/adverserial-diff_pruning_0.05-bert_uncased_L-4_H-256_A-4-64-2e-05-cp_init-weighted_loss_prot-age-seed{SEED}.pt"
+    "adv_gender": f"/share/home/lukash/pan16/bertl4/cp_cp_init/adverserial-diff_pruning_0.1-bert_uncased_L-4_H-256_A-4-64-2e-05-cp_init-weighted_loss_prot-gender-seed{SEED}.pt",
+    "adv_age": f"/share/home/lukash/pan16/bertl4/cp_cp_init/adverserial-diff_pruning_0.1-bert_uncased_L-4_H-256_A-4-64-2e-05-cp_init-weighted_loss_prot-age-seed{SEED}.pt"
 }
 # CP = {
-#     "modular_model": f"/share/home/lukash/pan16/bertl4/cp_special/modular-diff_pruning_0.1-bert_uncased_L-4_H-256_A-4-64-2e-05-weighted_loss_prot-gender_age-seed{SEED}-separate_optim.pt"
+#     "modular_model": f"/share/home/lukash/pan16/bertl4/cp_modular/modular-diff_pruning_0.05-bert_uncased_L-4_H-256_A-4-64-2e-05-weighted_loss_prot-gender_age-seed{SEED}.pt"
 # }
 
 
