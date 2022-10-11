@@ -335,10 +335,11 @@ class ModularDiffModel(BasePruningModel):
             desc = "task"
             forward_fn = lambda x: self(**x)
 
+        debiased_before = self._debiased
         idx_before = self._debiased_par_idx
         self.set_debiased(debiased, grad_switch=False, debiased_par_idx=debiased_par_idx)
         result = self._evaluate(val_loader, forward_fn, loss_fn, pred_fn, metrics, label_idx, desc)
-        self.set_debiased((not debiased), grad_switch=False, debiased_par_idx=idx_before)
+        self.set_debiased(debiased_before, grad_switch=False, debiased_par_idx=idx_before)
 
         return result
 
@@ -553,53 +554,6 @@ class ModularDiffModel(BasePruningModel):
             self._debiased_par_idx = debiased_par_idx
 
 
-    # def _init_optimizer_and_schedule(
-    #     self,
-    #     num_training_steps: int,
-    #     learning_rate: float,
-    #     learning_rate_task_head: float,
-    #     learning_rate_adv_head: float,
-    #     learning_rate_alpha: float,
-    #     learning_rate_bottleneck: float = 1e-4,
-    #     weight_decay: float = 0.0,
-    #     num_warmup_steps: int = 0
-    # ) -> None:
-
-    #     optimizer_param_groups = [
-    #         {
-    #             "params": self.bottleneck.parameters(),
-    #             "lr": learning_rate_bottleneck
-    #         },
-    #         {
-    #             "params": self.task_head.parameters(),
-    #             "lr": learning_rate_task_head
-    #         },
-    #         {
-    #             "params": self.adv_head.parameters(),
-    #             "lr": learning_rate_adv_head
-    #         }
-    #     ]
-
-    #     optimizer_param_groups.extend(
-    #         self._get_diff_param_groups(learning_rate, weight_decay, learning_rate_alpha)
-    #     )
-
-    #     if not self.sparse_task:
-    #         optimizer_param_groups.append(
-    #             {
-    #                 "params": [p for n,p in self.encoder.named_parameters() if n[-9:] == f".original"],
-    #                 "lr": learning_rate,
-    #                 "weight_decay": weight_decay
-    #             }
-    #         )
-
-    #     self.optimizer = AdamW(optimizer_param_groups, betas=(0.9, 0.999), eps=1e-08)
-
-    #     # self.scheduler = get_linear_schedule_with_warmup(
-    #     #     self.optimizer, num_warmup_steps=num_warmup_steps, num_training_steps=num_training_steps
-    #     # )
-
-
     def _init_optimizer_and_schedule(
         self,
         num_training_steps: int,
@@ -656,10 +610,10 @@ class ModularDiffModel(BasePruningModel):
             ]
 
             if self.adv_task_head:
-                {
+                adv_optimizer_param_groups.append({
                     "params": self.task_head[i-self.sparse_task+1].parameters(),
                     "lr": learning_rate_task_head
-                },
+                })
 
             adv_optimizer_param_groups.extend(
                 self._get_diff_param_groups(learning_rate, weight_decay, learning_rate_alpha, idx=i)
