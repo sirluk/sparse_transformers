@@ -540,7 +540,7 @@ class ModularDiffModel(BasePruningModel):
 
         if check_debiased and grad_switch:
             if not self.adv_task_head:
-                self.task_head[0](frozen=debiased)
+                self.task_head[0].freeze_parameters(frozen=debiased)
             if self.sparse_task:
                 self._freeze_parametrizations(debiased, 0)
             else:
