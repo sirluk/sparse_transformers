@@ -185,16 +185,17 @@ def train_diff_pruning_modular(
         adv_dropout = args_train.adv_dropout,
         adv_n_hidden = args_train.adv_n_hidden,
         adv_count = args_train.adv_count,
-        adv_task_head = args_train.modular_adv_task_head,
         bottleneck = args_train.bottleneck,
         bottleneck_dim = args_train.bottleneck_dim,
         bottleneck_dropout = args_train.bottleneck_dropout,
-        sparse_task = args_train.modular_sparse_task,
         concrete_lower = args_train.concrete_lower,
         concrete_upper = args_train.concrete_upper,
         structured_diff_pruning = args_train.structured_diff_pruning,
-        adv_merged = args_train.modular_adv_merged,
         alpha_init = args_train.alpha_init,
+        adv_task_head = args_train.modular_adv_task_head,
+        freeze_single_task_head = args_train.modular_freeze_single_task_head,
+        adv_merged = args_train.modular_adv_merged,
+        sparse_task = args_train.modular_sparse_task,
         encoder_state_dict = encoder_state_dict
     )
     trainer.to(device)

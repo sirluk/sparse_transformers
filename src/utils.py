@@ -93,9 +93,10 @@ def get_name_for_run(
 
     if modular:
         run_parts.extend([
-            "merged_head" if not args_train.modular_adv_task_head else None,
-            "sparse_task" if args_train.modular_sparse_task else None,
+            "adv_task_head" if args_train.modular_adv_task_head else None,
+            "freeze_task_head" if (not args_train.modular_adv_task_head) and args_train.modular_freeze_single_task_head else None,
             "adv_merged" if args_train.modular_adv_merged else None,
+            "sparse_task" if args_train.modular_sparse_task else None,
             "merged_cutoff" if args_train.modular_merged_cutoff else None
         ])
 

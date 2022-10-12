@@ -35,17 +35,18 @@ class ModularDiffModel(BasePruningModel):
         adv_dropout: float = .3,
         adv_n_hidden: int = 1,
         adv_count: int = 5,
-        adv_task_head: bool = True,
         bottleneck: bool = False,
         bottleneck_dim: Optional[int] = None,
         bottleneck_dropout: Optional[float] = None,
-        sparse_task: bool = False,
         fixmask_init: bool = False,
         concrete_lower: Optional[float] = -1.5,
         concrete_upper: Optional[float] = 1.5,
         structured_diff_pruning: Optional[bool] = True,
-        adv_merged: bool = True,
         alpha_init: Optional[Union[int, float]] = 5,
+        adv_task_head: bool = True,
+        freeze_single_task_head: bool = True,
+        adv_merged: bool = True,
+        sparse_task: bool = False,
         **kwargs
     ):
         super().__init__(model_name, **kwargs)
@@ -60,15 +61,16 @@ class ModularDiffModel(BasePruningModel):
         self.adv_dropout = adv_dropout
         self.adv_n_hidden = adv_n_hidden
         self.adv_count = adv_count
-        self.adv_task_head = adv_task_head
         self.has_bottleneck = bottleneck
         self.bottleneck_dim = bottleneck_dim
         self.bottleneck_dropout = bottleneck_dropout
-        self.sparse_task = sparse_task
         self.concrete_lower = concrete_lower
         self.concrete_upper = concrete_upper
         self.structured_diff_pruning = structured_diff_pruning
+        self.adv_task_head = adv_task_head
+        self.freeze_single_task_head = freeze_single_task_head
         self.adv_merged = adv_merged
+        self.sparse_task = sparse_task
 
         # bottleneck layer
         n_bottleneck = 1 + max(1, (not adv_merged) * len(num_labels_protected))
@@ -461,7 +463,7 @@ class ModularDiffModel(BasePruningModel):
                 for debiased_par_idx in range(self.n_parametrizations-self.sparse_task):
 
                     self.set_debiased(True, debiased_par_idx=debiased_par_idx)
-                
+
                     loss_debiased = 0.
                     partial_losses_debiased = torch.zeros((3,))
 
@@ -540,7 +542,7 @@ class ModularDiffModel(BasePruningModel):
             check_idx = True
 
         if check_debiased and grad_switch:
-            if not self.adv_task_head:
+            if (not self.adv_task_head) and self.freeze_single_task_head:
                 self.task_head[0].freeze_parameters(frozen=debiased)
             if self.sparse_task:
                 self._freeze_parametrizations(debiased, 0)
@@ -614,6 +616,11 @@ class ModularDiffModel(BasePruningModel):
                     "params": self.task_head[i-self.sparse_task+1].parameters(),
                     "lr": learning_rate_task_head
                 })
+            elif not self.freeze_single_task_head:
+                adv_optimizer_param_groups.append({
+                    "params": self.task_head[0].parameters(),
+                    "lr": learning_rate_task_head
+                })
 
             adv_optimizer_param_groups.extend(
                 self._get_diff_param_groups(learning_rate, weight_decay, learning_rate_alpha, idx=i)
@@ -658,7 +665,6 @@ class ModularDiffModel(BasePruningModel):
             "adv_dropout": self.adv_dropout,
             "adv_n_hidden": self.adv_n_hidden,
             "adv_count": self.adv_count,
-            "adv_task_head": self.adv_task_head,
             "bottleneck": self.has_bottleneck,
             "bottleneck_dim": self.bottleneck_dim,
             "bottleneck_dropout": self.bottleneck_dropout,
@@ -667,11 +673,13 @@ class ModularDiffModel(BasePruningModel):
             "bottleneck_state_dict": self.bottleneck.state_dict(),
             "task_head_state_dict": self.task_head.state_dict(),
             "adv_head_state_dict": self.adv_head.state_dict(),
-            "sparse_task": self.sparse_task,
             "concrete_lower": self.concrete_lower,
             "concrete_upper": self.concrete_upper,
             "structured_diff_pruning": self.structured_diff_pruning,
-            "adv_merged": self.adv_merged
+            "adv_task_head": self.adv_task_head,
+            "freeze_single_task_head": self.freeze_single_task_head,
+            "adv_merged": self.adv_merged,
+            "sparse_task": self.sparse_task
         }
 
         output_dir = Path(output_dir)
@@ -703,16 +711,17 @@ class ModularDiffModel(BasePruningModel):
             adv_dropout = info_dict['adv_dropout'],
             adv_n_hidden = info_dict['adv_n_hidden'],
             adv_count = info_dict['adv_count'],
-            adv_task_head = info_dict['adv_task_head'],
             bottleneck = info_dict['bottleneck'],
             bottleneck_dim = info_dict['bottleneck_dim'],
             bottleneck_dropout = info_dict['bottleneck_dropout'],
-            sparse_task = info_dict['sparse_task'],
             fixmask_init = info_dict['fixmask'],
             concrete_lower = info_dict['concrete_lower'],
             concrete_upper = info_dict['concrete_upper'],
             structured_diff_pruning = info_dict['structured_diff_pruning'],
-            adv_merged = info_dict['adv_merged']
+            adv_task_head = info_dict['adv_task_head'],
+            freeze_single_task_head = info_dict['freeze_single_task_head'],
+            adv_merged = info_dict['adv_merged'],
+            sparse_task = info_dict['sparse_task']
         )
 
         cls_instance.encoder.load_state_dict(info_dict['encoder_state_dict'])

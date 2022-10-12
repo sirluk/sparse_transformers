@@ -71,11 +71,12 @@ train_config:
     fixmask_pct: 0.1
     logging_step: 5
     cooldown: 5
+    modular_adv_task_head: False
+    modular_freeze_single_task_head: False
+    modular_adv_merged: False
     modular_sparse_task: False
-    modular_adv_task_head: True
     modular_merged_cutoff: False
     modular_merged_min_pct: 0.01
-    modular_adv_merged: False
 adv_attack:
     num_epochs: 40
     learning_rate: 1e-4
