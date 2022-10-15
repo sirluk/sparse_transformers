@@ -66,20 +66,22 @@ class TrainLogger:
         for k,v in d.items():
             self.writer.add_scalar(f"train/{k}{suffix}", v, step)
 
-    def is_best(self, val: float, ascending: bool) -> bool:
+    def is_best(self, val: float, ascending: bool, id: str = "loss") -> bool:
         try:
-            if ascending:
-                check = val < (self.best_eval_metric + self.delta)
-            else:
-                check = val > (self.best_eval_metric - self.delta)
-            if check:
-                self.best_eval_metric = val
-            return check
-        except TypeError:
-            self.best_eval_metric = val
+            best_val = self.best_eval_metric[id]
+        except KeyError:
+            self.best_eval_metric[id] = val
             return True
+
+        if ascending:
+            check = val < (best_val + self.delta)
+        else:
+            check = val > (best_val - self.delta)
+        if check:
+            self.best_eval_metric[id] = val
+        return check     
 
     def reset(self):
         self.steps = 0
         self.loss_dict = {}
-        self.best_eval_metric = None
+        self.best_eval_metric = {}
