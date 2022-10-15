@@ -226,6 +226,7 @@ def train_diff_pruning_modular(
         output_dir = args_train.output_dir,
         merged_cutoff = args_train.modular_merged_cutoff,
         merged_min_pct = args_train.modular_merged_min_pct,
+        cooldown = args_train.cooldown,
         fixmask_pct = args_train.fixmask_pct,
         protected_key = protected_key_list,
         checkpoint_name = train_logger.logger_name + ".pt",

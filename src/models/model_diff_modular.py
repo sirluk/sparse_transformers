@@ -19,7 +19,7 @@ class ModularDiffModel(BasePruningModel):
 
     @property
     def n_embeddings(self):
-        return 1 + max(1, (not self.adv_merged) * len(self.num_labels_protected))
+        return (not self.sparse_task) + self.n_parametrizations
 
     @property
     def _task_head_idx(self):
@@ -147,6 +147,7 @@ class ModularDiffModel(BasePruningModel):
         output_dir: Union[str, os.PathLike],
         merged_cutoff: bool,
         merged_min_pct: float,
+        cooldown: Optional[int] = None,
         concrete_lower: Optional[float] = None,
         concrete_upper: Optional[float] = None,
         structured_diff_pruning: Optional[bool] = None,
@@ -200,6 +201,9 @@ class ModularDiffModel(BasePruningModel):
             optimizer_warmup_steps
         )
 
+        do_task_step = True
+        performance_decrease_counter = 0
+
         train_str = "Epoch {}, model_state: {}, {}"
         str_suffix = lambda d, suffix="": ", ".join([f"{k}{suffix}: {v}" for k,v in d.items()])
 
@@ -240,10 +244,11 @@ class ModularDiffModel(BasePruningModel):
                 max_grad_norm,
                 loss_fn_protected,
                 _adv_lambda,
-                concrete_samples
+                concrete_samples,
+                do_task_step
             )
 
-            results_task= []
+            results_task = {}
             for i in range(self.n_embeddings):
                 k_debiased_idx = max(0,i-1)
                 res_task = self.evaluate(
@@ -261,10 +266,10 @@ class ModularDiffModel(BasePruningModel):
                     k = "task_debiased"
                 else:
                     k = f"task_debiased_{protected_key[k_debiased_idx]}"
-                results_task.append((k, res_task))
+                results_task[k] = res_task
                 logger.validation_loss(epoch, res_task, suffix=k)
 
-            results_protected = []
+            results_protected = {}
             for i, (prot_key, loss_fn_prot, pred_fn_prot, metrics_prot) in enumerate(zip(
                 protected_key, loss_fn_protected, pred_fn_protected, metrics_protected
             )):
@@ -278,7 +283,7 @@ class ModularDiffModel(BasePruningModel):
                     debiased=True,
                     debiased_par_idx=i
                 )
-                results_protected.append((k, res_prot))
+                results_protected[k] = res_prot
                 logger.validation_loss(epoch, res_prot, suffix=k)
 
             # count non zero
@@ -293,9 +298,9 @@ class ModularDiffModel(BasePruningModel):
                 logger.non_zero_params(epoch, n_p, n_p_zero, n_p_between, suffix)
 
             result_strings = []
-            for (k, r) in results_task:
+            for k, r in results_task.items():
                 result_strings.append(str_suffix(r, f"_{k}"))
-            for (k, r) in results_protected:
+            for k, r in results_protected.items():
                 result_strings.append(str_suffix(r, f"_{k}"))
             result_str = ", ".join(result_strings)
 
@@ -304,6 +309,17 @@ class ModularDiffModel(BasePruningModel):
             )
 
             if self.fixmask_state or ((num_epochs_fixmask == 0) and (epoch >= num_epochs_warmup)):
+
+                if cooldown is not None and \
+                    (self.adv_task_head or ((not self.adv_task_head) and self.freeze_single_task_head)):
+                    
+                    if logger.is_best(results_task["task"]["loss"], ascending=True, id="loss"):
+                        performance_decrease_counter = 0
+                    else:
+                        performance_decrease_counter += 1
+
+                    do_task_step = (performance_decrease_counter <= cooldown)
+
                 cpt = self.save_checkpoint(
                     Path(output_dir),
                     checkpoint_name,
@@ -356,7 +372,8 @@ class ModularDiffModel(BasePruningModel):
         max_grad_norm: float,
         loss_fn_protected: Union[list, tuple],
         adv_lambda: float,
-        concrete_samples: int
+        concrete_samples: int,
+        do_task_step: bool = True
     ) -> None:
 
         self.train()
@@ -374,32 +391,35 @@ class ModularDiffModel(BasePruningModel):
 
             ##################################################
             # START STEP TASK
-            self.set_debiased(False)
-
-            loss_biased = 0.
+            loss_biased = torch.tensor(0., device=self.device)
             partial_losses_biased = torch.zeros((2,))
-            for _ in range(concrete_samples_task):
 
-                outputs = self(**inputs)
-                loss_task = loss_fn(outputs, labels_task.to(self.device))
-                loss_biased += loss_task
+            if do_task_step:
 
-                loss_l0 = torch.tensor(0.)
-                if self.finetune_state and self.sparse_task:
-                    loss_l0 = self._get_sparsity_loss(log_ratio, sparsity_pen, 0)
-                    loss_biased += loss_l0
+                self.set_debiased(False)
 
-                partial_losses_biased += torch.tensor([loss_task, loss_l0]).detach()
+                for _ in range(concrete_samples_task):
 
-            loss_biased /= concrete_samples_task
-            partial_losses_biased /= concrete_samples_task
+                    outputs = self(**inputs)
+                    loss_task = loss_fn(outputs, labels_task.to(self.device))
+                    loss_biased += loss_task
 
-            loss_biased.backward()
+                    loss_l0 = torch.tensor(0.)
+                    if self.finetune_state and self.sparse_task:
+                        loss_l0 = self._get_sparsity_loss(log_ratio, sparsity_pen, 0)
+                        loss_biased += loss_l0
 
-            torch.nn.utils.clip_grad_norm_(self.parameters(), max_grad_norm)
+                    partial_losses_biased += torch.tensor([loss_task, loss_l0]).detach()
 
-            self.optimizer_task.step()
-            self.optimizer_task.zero_grad()
+                loss_biased /= concrete_samples_task
+                partial_losses_biased /= concrete_samples_task
+
+                loss_biased.backward()
+
+                torch.nn.utils.clip_grad_norm_(self.parameters(), max_grad_norm)
+
+                self.optimizer_task.step()
+                self.optimizer_task.zero_grad()
 
             # pnames, params = zip(*[(n,p) for n,p in self.encoder.named_parameters() if n[-9:] == f".original"])
             # rand_idx = [torch.randperm(p.numel())[0].item() for p in params]

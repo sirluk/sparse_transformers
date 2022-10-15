@@ -155,7 +155,7 @@ class AdvModel(BaseModel):
             )
             logger.validation_loss(epoch, result, suffix="task_debiased")
 
-            results_protected = []
+            results_protected = {}
             for i, (prot_key, loss_fn_prot, pred_fn_prot, metrics_prot) in enumerate(zip(
                 protected_key, loss_fn_protected, pred_fn_protected, metrics_protected
             )):
@@ -167,12 +167,12 @@ class AdvModel(BaseModel):
                     metrics_prot,
                     label_idx=i+1
                 )
-                results_protected.append((k, res_prot))
+                results_protected[k] = res_prot
                 logger.validation_loss(epoch, res_prot, suffix=k)
 
             result_name = "_task_debiased" if len(protected_key)>1 else f"_task_debiased_{protected_key[0]}"
             result_strings = [str_suffix(result, result_name)]
-            for (k, r) in results_protected:
+            for k, r in results_protected.items():
                 result_strings.append(str_suffix(r, f"_{k}"))
             result_str = ", ".join(result_strings)
 
