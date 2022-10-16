@@ -308,23 +308,27 @@ class ModularDiffModel(BasePruningModel):
                 train_str.format(epoch, self.model_state, result_str), refresh=True
             )
 
-            if self.fixmask_state or ((num_epochs_fixmask == 0) and (epoch >= num_epochs_warmup)):
+            check_save_cp = self.fixmask_state or ((num_epochs_fixmask == 0) and (epoch >= num_epochs_warmup))
+            check_do_task_step = ((self.sparse_task and check_save_cp) or (not self.sparse_task)) and \
+                (cooldown is not None) and \
+                (self.adv_task_head or ((not self.adv_task_head) and self.freeze_single_task_head))
 
-                if cooldown is not None and \
-                    (self.adv_task_head or ((not self.adv_task_head) and self.freeze_single_task_head)):
-                    
-                    if logger.is_best(results_task["task"]["loss"], ascending=True, id="loss"):
-                        performance_decrease_counter = 0
-                    else:
-                        performance_decrease_counter += 1
+            if check_do_task_step:   
+                if logger.is_best(results_task["task"]["loss"], ascending=True, id="loss"):
+                    performance_decrease_counter = 0
+                else:
+                    performance_decrease_counter += 1
+                do_task_step = (performance_decrease_counter <= cooldown)
 
-                    do_task_step = (performance_decrease_counter <= cooldown)
-
+            if check_save_cp:
                 cpt = self.save_checkpoint(
                     Path(output_dir),
                     checkpoint_name,
                     seed
                 )
+
+            # TEMP
+            logger.validation_loss(epoch, {"do task step": int(do_task_step)})
 
         self.set_debiased(False) # deactivate debiasing at end of training
 
