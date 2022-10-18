@@ -628,13 +628,20 @@ class ModularDiffModel(BasePruningModel):
                 {
                     "params": self.bottleneck[i].parameters(),
                     "lr": learning_rate_bottleneck
-                },
-                {
-                    "params": self.adv_head[i-self.sparse_task].parameters(),
-                    "lr": learning_rate_adv_head
                 }
             ]
 
+            if self.adv_merged:
+                adv_optimizer_param_groups.append({
+                    "params": self.adv_head.parameters(),
+                    "lr": learning_rate_adv_head
+                })
+            else:
+                adv_optimizer_param_groups.append({
+                    "params": self.adv_head[i-self.sparse_task].parameters(),
+                    "lr": learning_rate_adv_head
+                })
+                
             if self.adv_task_head:
                 adv_optimizer_param_groups.append({
                     "params": self.task_head[i-self.sparse_task+1].parameters(),
