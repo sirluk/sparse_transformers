@@ -23,18 +23,21 @@ GPU_ID = 0
 SEED = 0
 DEVICE = f"cuda:{GPU_ID}" if torch.cuda.is_available() else "cpu"
 DS = "pan16"
-LOG_DIR = "logs_merged_masks"
-LOGGER_NAME = "adv_0.1_seed{}".format(SEED)
-MODEL_ADV_CLS = AdvDiffModel
-MODEL_TASK_CLS = TaskModel
-CP = {
-    "task_model": f"/share/home/lukash/pan16/bertl4/cp/task-baseline-bert_uncased_L-4_H-256_A-4-64-2e-05-weighted_loss_prot-seed{SEED}.pt",
-    "adv_gender": f"/share/home/lukash/pan16/bertl4/cp_cp_init/adverserial-diff_pruning_0.1-bert_uncased_L-4_H-256_A-4-64-2e-05-cp_init-weighted_loss_prot-gender-seed{SEED}.pt",
-    "adv_age": f"/share/home/lukash/pan16/bertl4/cp_cp_init/adverserial-diff_pruning_0.1-bert_uncased_L-4_H-256_A-4-64-2e-05-cp_init-weighted_loss_prot-age-seed{SEED}.pt"
-}
+LOG_DIR = f"logs_merged_masks_{DS}"
+# LOGGER_NAME = f"mod_no_adv_frozen_0.05_seed{SEED}"
+# LOGGER_NAME = f"mod_adv_0.05_seed{SEED}"
+LOGGER_NAME = f"mod_no_adv_0.05_seed{SEED}"
 # CP = {
-#     "modular_model": f"/share/home/lukash/pan16/bertl4/cp_modular/modular-diff_pruning_0.05-bert_uncased_L-4_H-256_A-4-64-2e-05-weighted_loss_prot-gender_age-seed{SEED}.pt"
+#     "task_model": f"/share/home/lukash/pan16/bertl4/cp/task-baseline-bert_uncased_L-4_H-256_A-4-64-2e-05-weighted_loss_prot-seed{SEED}.pt",
+#     "adv_gender": f"/share/home/lukash/pan16/bertl4/cp_cp_init/adverserial-diff_pruning_0.1-bert_uncased_L-4_H-256_A-4-64-2e-05-cp_init-weighted_loss_prot-gender-seed{SEED}.pt",
+#     "adv_age": f"/share/home/lukash/pan16/bertl4/cp_cp_init/adverserial-diff_pruning_0.1-bert_uncased_L-4_H-256_A-4-64-2e-05-cp_init-weighted_loss_prot-age-seed{SEED}.pt"
 # }
+CP = {
+    # "modular_model": f"/share/home/lukash/pan16/bertl4/cp_modular/modular-diff_pruning_0.05-freeze_task_head-bert_uncased_L-4_H-256_A-4-64-2e-05-weighted_loss_prot-gender_age-seed{SEED}.pt"
+    # "modular_model": f"/share/home/lukash/pan16/bertl4/cp_modular/modular-diff_pruning_0.05-adv_task_head-bert_uncased_L-4_H-256_A-4-64-2e-05-weighted_loss_prot-gender_age-seed{SEED}.pt"
+    "modular_model": f"/share/home/lukash/pan16/bertl4/cp_modular/modular-diff_pruning_0.05-bert_uncased_L-4_H-256_A-4-64-2e-05-weighted_loss_prot-gender_age-seed{SEED}.pt"
+
+}
 
 
 def merge_adv_models_wrapper(cp_gender, cp_age, cp_base = None):
@@ -68,8 +71,8 @@ def main():
     torch.manual_seed(SEED)
     print(f"torch.manual_seed({SEED})")
 
-    model = merge_adv_models_wrapper(CP["adv_gender"], CP["adv_age"]) # , cp_base=CP["task_model"]
-    # model = merge_modular_models_wrapper(CP["modular_model"]) # , cp_base=CP["task_model"]
+    # model = merge_adv_models_wrapper(CP["adv_gender"], CP["adv_age"]) # , cp_base=CP["task_model"]
+    model = merge_modular_models_wrapper(CP["modular_model"]) # , cp_base=CP["task_model"]
 
     # # TEMP - for debugging
     # from src.model_functions import get_param_from_name
