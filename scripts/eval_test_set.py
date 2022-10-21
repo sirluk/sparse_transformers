@@ -120,7 +120,6 @@ def main():
                 train_logger.validation_loss(0, result_protected, suffix="protected")
 
         adv_attack(
-            trainer = model,
             train_loader = train_loader,
             val_loader = test_loader,
             logger = train_logger,
@@ -134,13 +133,13 @@ def main():
             num_epochs = args_attack.num_epochs,
             lr = args_attack.learning_rate,
             cooldown = args_attack.cooldown,
+            trainer = model,
             batch_size = args_attack.attack_batch_size,
             logger_suffix = f"adv_attack{'_debiased' if ('adv' in cp or 'modular' in cp) else ''}"
         )
         if "modular" in cp:
             model.set_debiased(False)
             adv_attack(
-                trainer = model,
                 train_loader = train_loader,
                 val_loader = test_loader,
                 logger = train_logger,
@@ -154,6 +153,7 @@ def main():
                 num_epochs = args_attack.num_epochs,
                 lr = args_attack.learning_rate,
                 cooldown = args_attack.cooldown,
+                trainer = model,
                 batch_size = args_attack.attack_batch_size,
                 logger_suffix = "adv_attack"
             )
