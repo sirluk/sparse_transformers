@@ -42,7 +42,7 @@ def merge_modular_models_wrapper(cp_modular, mean_diff_weights = True, mean_igno
 
 
 
-DEBUG = True
+DEBUG = False
 GPU_ID = 0
 SEED = 0
 DS = "pan16"
