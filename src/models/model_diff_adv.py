@@ -13,7 +13,7 @@ from typing import Union, Callable, Dict, Optional
 from src.models.model_heads import ClfHead, AdvHead
 from src.models.model_base import BasePruningModel
 from src.training_logger import TrainLogger
-from src.utils import dict_to_device
+from src.utils import dict_to_device, evaluate_model, get_mean_loss
 
 
 class AdvDiffModel(BasePruningModel):
@@ -237,7 +237,7 @@ class AdvDiffModel(BasePruningModel):
                     loss_fn_prot,
                     pred_fn_prot,
                     metrics_prot,
-                    label_idx=i+1
+                    label_idx=i+2
                 )
                 results_protected[k] = res_prot
                 logger.validation_loss(epoch, res_prot, suffix=k)
@@ -276,18 +276,29 @@ class AdvDiffModel(BasePruningModel):
         loss_fn: Callable,
         pred_fn: Callable,
         metrics: Dict[str, Callable],
-        label_idx: int = 0
+        label_idx: int = 1
     ) -> dict:
         self.eval()
 
-        if label_idx > 0:
-            desc = f"protected attribute {label_idx-1}"
-            forward_fn = lambda x: self.forward_protected(head_idx=label_idx-1, **x)
+        if label_idx > 1:
+            desc = f"protected attribute {label_idx-2}"
+            forward_fn = lambda x: self.forward_protected(head_idx=label_idx-2, **x)
         else:
             desc = "task"
             forward_fn = lambda x: self(**x)
+            label_idx = max(1, label_idx)
 
-        return self._evaluate(val_loader, forward_fn, loss_fn, pred_fn, metrics, label_idx, desc)
+        return evaluate_model(
+            self,
+            val_loader,
+            loss_fn,
+            pred_fn,
+            metrics,
+            input_idx=0,
+            label_idx=label_idx,
+            desc=desc,
+            forward_fn=forward_fn
+        )
 
 
     def _step(
@@ -326,7 +337,7 @@ class AdvDiffModel(BasePruningModel):
 
                 for i, (l, loss_fn_prot) in enumerate(zip(labels_protected, loss_fn_protected)):
                     outputs_protected = self.adv_head[i].forward_reverse(hidden, lmbda = adv_lambda)
-                    loss_protected = self._get_mean_loss(outputs_protected, l.to(self.device), loss_fn_prot)
+                    loss_protected = get_mean_loss(outputs_protected, l.to(self.device), loss_fn_prot)
                     loss += loss_protected
 
                 loss_l0 = torch.tensor(0.)

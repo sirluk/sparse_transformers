@@ -12,7 +12,7 @@ from typing import Union, Callable, Dict, Optional
 from src.models.model_heads import ClfHead
 from src.models.model_base import BaseModel
 from src.training_logger import TrainLogger
-from src.utils import dict_to_device
+from src.utils import dict_to_device, evaluate_model
 
 
 class TaskModel(BaseModel):
@@ -143,7 +143,14 @@ class TaskModel(BaseModel):
 
         forward_fn = lambda x: self(**x)
 
-        return self._evaluate(val_loader, forward_fn, loss_fn, pred_fn, metrics)
+        return evaluate_model(
+            self,
+            val_loader,
+            loss_fn,
+            pred_fn,
+            metrics,
+            forward_fn=forward_fn
+        )
 
     def _step(
         self,

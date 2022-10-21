@@ -80,62 +80,6 @@ class BaseModel(torch.nn.Module):
         return self.encoder(**x)[0][:,0]
 
 
-    @torch.no_grad()
-    def _evaluate(
-        self,
-        val_loader: DataLoader,
-        forward_fn: Callable,
-        loss_fn: Callable,
-        pred_fn: Callable,
-        metrics: Dict[str, Callable],
-        label_idx: int = 0,
-        desc: str = "",
-        **kwargs
-        ) -> dict:
-
-        self.eval()
-
-        eval_loss = 0.
-        output_list = []
-        val_iterator = tqdm(val_loader, desc=f"evaluating {desc}", leave=False, position=1)
-        for i, batch in enumerate(val_iterator):
-
-            inputs, labels = batch[0], batch[1+label_idx]
-            if isinstance(inputs, dict):
-                inputs = dict_to_device(inputs, self.device)
-            else:
-                inputs = inputs.to(self.device)
-            logits = forward_fn(inputs, **kwargs)
-            if isinstance(logits, list):
-                eval_loss += torch.stack([loss_fn(x, labels.to(self.device)) for x in logits]).mean().item()
-                preds, _ = torch.mode(torch.stack([pred_fn(x.cpu()) for x in logits]), dim=0)
-            else:
-                eval_loss += loss_fn(logits, labels.to(self.device)).item()
-                preds = pred_fn(logits.cpu())
-            output_list.append((
-                preds,
-                labels
-            ))
-
-        p, l = list(zip(*output_list))
-        predictions = torch.cat(p, dim=0)
-        labels = torch.cat(l, dim=0)
-
-        result = {metric_name: metric(predictions, labels) for metric_name, metric in metrics.items()}
-        result["loss"] = eval_loss / (i+1)
-
-        return result
-
-
-    def _get_mean_loss(self, outputs: Union[torch.Tensor, List[torch.Tensor]], labels: torch.Tensor, loss_fn: Callable) -> torch.Tensor:
-        if isinstance(outputs, torch.Tensor):
-            outputs = [outputs]
-        losses = []
-        for output in outputs:
-            losses.append(loss_fn(output, labels))
-        return torch.stack(losses).mean()
-
-
     def get_layer_idx_from_module(self, module_name: str) -> int:
         # get layer index based on module name
         if self.model_type == "xlnet":

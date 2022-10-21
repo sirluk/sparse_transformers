@@ -2,12 +2,83 @@ import os
 import argparse
 from pathlib import Path
 from functools import reduce
+from tqdm import tqdm
 import torch
+from torch.utils.data import DataLoader
 
 from typing import Union, List, Tuple, Callable, Dict, Optional
 
 from src.training_logger import TrainLogger
 from src.metrics import accuracy
+
+
+def get_mean_loss(
+    outputs: Union[torch.Tensor, List[torch.Tensor]],
+    labels: torch.Tensor, 
+    loss_fn: Callable
+) -> torch.Tensor:
+    if isinstance(outputs, torch.Tensor):
+        outputs = [outputs]
+    losses = []
+    for output in outputs:
+        losses.append(loss_fn(output, labels))
+    return torch.stack(losses).mean()
+
+
+@torch.no_grad()
+def evaluate_model(
+    model: torch.nn.Module,
+    val_loader: DataLoader,
+    loss_fn: Callable,
+    pred_fn: Callable,
+    metrics: Dict[str, Callable],
+    input_idx: int = 0,
+    label_idx: int = 1,
+    desc: str = "",
+    forward_fn: Optional[Callable] = None,
+    **forward_fn_kwargs
+    ) -> dict:
+
+    model.eval()
+
+    try:
+        dev = model.device
+    except AttributeError:
+        dev = next(model.parameters()).device
+
+    if forward_fn is None:
+        forward_fn = lambda x: model(x, **forward_fn_kwargs)
+
+    eval_loss = 0.
+    output_list = []
+    val_iterator = tqdm(val_loader, desc=f"evaluating {desc}", leave=False, position=1)
+    for i, batch in enumerate(val_iterator):
+
+        inputs, labels = batch[input_idx], batch[label_idx]
+        if isinstance(inputs, dict):
+            inputs = dict_to_device(inputs, dev)
+        else:
+            inputs = inputs.to(dev)
+        logits = forward_fn(inputs)
+        if isinstance(logits, list):
+            eval_loss += torch.stack([loss_fn(x, labels.to(dev)) for x in logits]).mean().item()
+            preds, _ = torch.mode(torch.stack([pred_fn(x.cpu()) for x in logits]), dim=0)
+        else:
+            eval_loss += loss_fn(logits, labels.to(dev)).item()
+            preds = pred_fn(logits.cpu())
+        output_list.append((
+            preds,
+            labels
+        ))
+
+    p, l = list(zip(*output_list))
+    predictions = torch.cat(p, dim=0)
+    labels = torch.cat(l, dim=0)
+
+    result = {metric_name: metric(predictions, labels) for metric_name, metric in metrics.items()}
+    result["loss"] = eval_loss / (i+1)
+
+    return result
 
 
 def get_param_from_name(

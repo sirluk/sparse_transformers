@@ -13,7 +13,7 @@ from src.models.model_diff_task import TaskDiffModel
 from src.models.model_adv import AdvModel
 from src.models.model_task import TaskModel
 from src.training_logger import TrainLogger
-from src.utils import dict_to_device, get_param_from_name
+from src.utils import dict_to_device, get_param_from_name, evaluate_model
 
 from typing import Optional, Union, Callable, Dict
 
@@ -28,7 +28,9 @@ AVAILABLE_MODEL_CLASSES = [
 
 
 @torch.no_grad()
-def merge_models(*model_list) -> torch.nn.Module:
+def merge_models(
+    *model_list, mean: bool = False, mean_ignore_zero: bool = False
+) -> torch.nn.Module:
     # assert all weights match
     sets = [set([n for n, _ in m.named_parameters()]) for m in model_list]
     try:
@@ -39,11 +41,22 @@ def merge_models(*model_list) -> torch.nn.Module:
         missing = [k for k in all_keys if k not in intersect]
         raise Exception(f"Keys {missing} not present in all models")
 
+    if mean and mean_ignore_zero:
+        norm_dict = {p_name: 0 for p_name, _ in model_list[0].named_parameters()}
+        for m in model_list:
+            for p_name, p in m.named_parameters():
+                norm_dict[p_name] += (p==0.)
+
     model_frame = deepcopy(model_list[0])
     for p_name, p in model_frame.named_parameters():
         p.zero_()
         for i in range(len(model_list)):
             p_add = get_param_from_name(model_list[i], p_name)
+            if mean:
+                if mean_ignore_zero:
+                    p_add /= max(norm_dict[p_name], 1)
+                else:
+                    p_add /= len(model_list)
             p += p_add
 
     return model_frame
@@ -51,66 +64,36 @@ def merge_models(*model_list) -> torch.nn.Module:
 
 @torch.no_grad()
 def merge_adv_models(
-    *adv_model_list
+    *adv_model_list, mean_diff_weights: bool = False, mean_ignore_zero: bool = False
 ):
     diff_weights = [m.get_diff_weights(0, as_module=True) for m in adv_model_list]
+    if mean_diff_weights and len(diff_weights)>1:
+        diff_weights = [merge_models(*diff_weights, mean=True, mean_ignore_zero=mean_ignore_zero)]
+
     base_weights = adv_model_list[0].get_base_weights(as_module=True)
-    for p_name, p in base_weights.named_parameters():
-        for dw in diff_weights:
-            p_add = get_param_from_name(dw, p_name)
-            p += (p_add / len(diff_weights))
-    return base_weights
+
+    return merge_models(base_weights, *diff_weights, mean=False)
 
 
 @torch.no_grad()
 def merge_modular_model(
-    modular_model
+    modular_model, mean_diff_weights: bool = False, mean_ignore_zero: bool = False
 ):
     diff_weights = []
     for i in range(modular_model.sparse_task, modular_model.n_parametrizations):
         diff_weights.append(
             modular_model.get_diff_weights(i, as_module=True)
         )
+        
+    if mean_diff_weights and len(diff_weights)>1:
+        diff_weights = [merge_models(*diff_weights, mean=True, mean_ignore_zero=mean_ignore_zero)]
+
     if modular_model.sparse_task:
         base_weights = modular_model.get_diff_weights(0, as_module=True)
     else:
         base_weights = modular_model.get_base_weights(as_module=True)
 
-    return merge_models(base_weights, *diff_weights)
-
-
-@torch.no_grad()
-def merge_diff_models(
-    diff_model_list: list,
-    base_model: Optional[torch.nn.Module] = None,
-    only_first: bool = False
-) -> BaseModel:
-    model_name = diff_model_list[0].model_name
-    model_list = []
-    for m in diff_model_list:
-        if only_first:
-            idx_list = [0]
-        else:
-            idx_list = list(range(m.n_parametrizations))
-        for idx in idx_list:
-            model = m.get_diff_weights(idx, as_module=True)
-            model = BaseModel(model_name, model.state_dict())
-            model_list.append(model)
-    # if no base_model is provided take the mean of the weights from the base weights of the diff models
-    if base_model is None:
-        base_model = BaseModel(model_name)
-        bms = [m.get_base_weights() for m in diff_model_list]
-        for values in zip(*bms):
-            _n, p_list = list(zip(*values))
-            _n = _n[0]
-            p = get_param_from_name(base_model.encoder, _n)
-            p_new = (torch.stack(p_list) / len(p_list)).sum(0)
-            p.copy_(p_new)
-        model_list.append(base_model)
-    else:
-        sd = base_model.encoder.state_dict()
-        model_list.append(BaseModel(model_name, sd))
-    return merge_models(model_list)
+    return merge_models(base_weights, *diff_weights, mean=False)
 
 
 @torch.no_grad()
@@ -135,7 +118,6 @@ def generate_embeddings(
 
 
 def train_head(
-    trainer: BaseModel,
     head: torch.nn.Module,
     train_loader: DataLoader,
     val_loader: DataLoader,
@@ -147,12 +129,16 @@ def train_head(
     num_epochs: int,
     lr: float,
     cooldown: int = 5,
+    device: Optional[Union[str, torch.device]] = None,
     desc: str = ""
 ):
 
     logger.reset()
 
-    head.to(trainer.device)
+    if device:
+        head.to(device)
+    else:
+        device = next(head.parameters()).device
 
     optimizer = optim(head.parameters(), lr=lr)
     # scheduler = get_linear_schedule_with_warmup(
@@ -170,12 +156,12 @@ def train_head(
         epoch_str = "training {} - step {}, loss: {:7.5f}"
         epoch_iterator = tqdm(train_loader, desc=epoch_str.format(desc, 0, math.nan), leave=False, position=1)
 
+        head.train()
+
         for step, (inputs, labels) in enumerate(epoch_iterator):
 
-            head.train()
-
-            outputs = head(inputs.to(trainer.device))
-            loss = trainer._get_mean_loss(outputs, labels.to(trainer.device), loss_fn)
+            outputs = head(inputs.to(device))
+            loss = loss_fn(outputs, labels.to(device))
 
             loss.backward()
             optimizer.step()
@@ -188,9 +174,7 @@ def train_head(
 
             global_step += 1
 
-        head.eval()
-        forward_fn = lambda x, head: head(x)
-        result = trainer._evaluate(val_loader, forward_fn, loss_fn, pred_fn, metrics, head=head)
+        result = evaluate_model(head, val_loader, loss_fn, pred_fn, metrics)
 
         logger.validation_loss(epoch, result, desc)
 

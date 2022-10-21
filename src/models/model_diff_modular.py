@@ -12,7 +12,7 @@ from typing import Union, Callable, Dict, Optional
 from src.models.model_heads import AdvHead, ClfHead
 from src.models.model_base import BasePruningModel
 from src.training_logger import TrainLogger
-from src.utils import dict_to_device
+from src.utils import dict_to_device, evaluate_model, get_mean_loss
 
 
 class ModularDiffModel(BasePruningModel):
@@ -256,7 +256,7 @@ class ModularDiffModel(BasePruningModel):
                     loss_fn,
                     pred_fn,
                     metrics,
-                    label_idx=0,
+                    label_idx=1,
                     debiased=bool(i),
                     debiased_par_idx=k_debiased_idx
                 )
@@ -279,7 +279,7 @@ class ModularDiffModel(BasePruningModel):
                     loss_fn_prot,
                     pred_fn_prot,
                     metrics_prot,
-                    label_idx=i+1,
+                    label_idx=i+2,
                     debiased=True,
                     debiased_par_idx=i
                 )
@@ -344,23 +344,33 @@ class ModularDiffModel(BasePruningModel):
         loss_fn: Callable,
         pred_fn: Callable,
         metrics: Dict[str, Callable],
-        label_idx: int = 0,
+        label_idx: int = 1,
         debiased: bool = False,
         debiased_par_idx: int = 0
     ) -> dict:
         self.eval()
 
-        if label_idx > 0:
-            desc = f"protected attribute {label_idx-1}"
-            forward_fn = lambda x: self.forward_protected(head_idx=label_idx-1, **x)
+        if label_idx > 1:
+            desc = f"protected attribute {label_idx-2}"
+            forward_fn = lambda x: self.forward_protected(head_idx=label_idx-2, **x)
         else:
             desc = "task"
             forward_fn = lambda x: self(**x)
+            label_idx = max(1, label_idx)
 
         debiased_before = self._debiased
         idx_before = self._debiased_par_idx
         self.set_debiased(debiased, grad_switch=False, debiased_par_idx=debiased_par_idx)
-        result = self._evaluate(val_loader, forward_fn, loss_fn, pred_fn, metrics, label_idx, desc)
+        result = evaluate_model(
+            self,
+            val_loader,
+            loss_fn,
+            pred_fn,
+            metrics,
+            label_idx=label_idx,
+            desc=desc,
+            forward_fn=forward_fn
+        )
         self.set_debiased(debiased_before, grad_switch=False, debiased_par_idx=idx_before)
 
         return result
@@ -453,7 +463,7 @@ class ModularDiffModel(BasePruningModel):
                     loss_protected = 0.
                     for i, (l, loss_fn_prot) in enumerate(zip(labels_protected, loss_fn_protected)):
                         outputs_protected = self.adv_head[i].forward_reverse(hidden, lmbda = adv_lambda)
-                        loss_protected += self._get_mean_loss(outputs_protected, l.to(self.device), loss_fn_prot)
+                        loss_protected += get_mean_loss(outputs_protected, l.to(self.device), loss_fn_prot)
                         loss_debiased += loss_protected
 
                     loss_l0_adv = torch.tensor(0.)
@@ -502,7 +512,7 @@ class ModularDiffModel(BasePruningModel):
                         l = labels_protected[debiased_par_idx]
                         loss_fn_prot = loss_fn_protected[debiased_par_idx]
                         outputs_protected = self.adv_head[debiased_par_idx].forward_reverse(hidden, lmbda = adv_lambda)
-                        loss_protected = self._get_mean_loss(outputs_protected, l.to(self.device), loss_fn_prot)
+                        loss_protected = get_mean_loss(outputs_protected, l.to(self.device), loss_fn_prot)
                         loss_debiased += loss_protected
 
                         loss_l0_adv = torch.tensor(0.)
