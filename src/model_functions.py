@@ -42,10 +42,14 @@ def merge_models(
         raise Exception(f"Keys {missing} not present in all models")
 
     if mean and mean_ignore_zero:
-        norm_dict = {p_name: 0 for p_name, _ in model_list[0].named_parameters()}
+        norm_dict = {}
         for m in model_list:
             for p_name, p in m.named_parameters():
-                norm_dict[p_name] += (p!=0.)
+                try:
+                    norm_dict[p_name] += (p!=0.)
+                except:
+                    norm_dict[p_name] = (p!=0.).long()
+        norm_dict = {p_name: v.clamp(min=1) for p_name, v in norm_dict.items()}
 
     model_frame = deepcopy(model_list[0])
     for p_name, p in model_frame.named_parameters():
@@ -54,7 +58,7 @@ def merge_models(
             p_add = get_param_from_name(model_list[i], p_name)
             if mean:
                 if mean_ignore_zero:
-                    p_add /= max(norm_dict[p_name], 1)
+                    p_add /= norm_dict[p_name]
                 else:
                     p_add /= len(model_list)
             p += p_add
