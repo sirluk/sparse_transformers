@@ -45,7 +45,7 @@ def merge_models(
         norm_dict = {p_name: 0 for p_name, _ in model_list[0].named_parameters()}
         for m in model_list:
             for p_name, p in m.named_parameters():
-                norm_dict[p_name] += (p==0.)
+                norm_dict[p_name] += (p!=0.)
 
     model_frame = deepcopy(model_list[0])
     for p_name, p in model_frame.named_parameters():
