@@ -157,10 +157,9 @@ def get_name_for_run(
     if baseline:
         run_parts.append("baseline")
     else:
-        run_parts.extend([
-            f"diff_pruning_{args_train.fixmask_pct if args_train.num_epochs_fixmask>0 else 'no_fixmask'}",
-            f"a_samples_{args_train.concrete_samples}" if args_train.concrete_samples > 1 else None
-        ])
+        run_parts.append(
+            f"diff_pruning_{args_train.fixmask_pct if args_train.num_epochs_fixmask>0 else 'no_fixmask'}"
+        )
 
     if modular:
         run_parts.extend([
@@ -183,6 +182,8 @@ def get_name_for_run(
         args_train.model_name.split('/')[-1],
         str(args_train.batch_size),
         str(args_train.learning_rate),
+        f"a_samples_{args_train.concrete_samples}" if args_train.concrete_samples > 1 else None,
+        f"sp_pen{args_train.sparsity_pen}" if not baseline else None,
         "cp_init" if cp_path else None,
         "weighted_loss_prot" if args_train.weighted_loss_protected and (adv or modular) else None,
         prot_attr if (adv or modular) else None,
