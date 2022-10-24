@@ -38,6 +38,8 @@ class AdvDiffModel(BasePruningModel):
         alpha_init: Optional[Union[int, float]] = 5,
         encoder_state_dict: OrderedDict = None,
         state_dict_load_to_par: bool = False,
+        task_head_state_dict: OrderedDict = None,
+        task_head_freeze: bool = False,
         **kwargs
     ):
         if (encoder_state_dict is not None) and (not state_dict_load_to_par):
@@ -61,6 +63,7 @@ class AdvDiffModel(BasePruningModel):
         self.concrete_lower = concrete_lower
         self.concrete_upper = concrete_upper
         self.structured_diff_pruning = structured_diff_pruning
+        self.task_head_freeze = task_head_freeze
 
         # bottleneck layer
         if self.has_bottleneck:
@@ -72,6 +75,12 @@ class AdvDiffModel(BasePruningModel):
 
         # heads
         self.task_head = ClfHead([self.in_size_heads]*(task_n_hidden+1), num_labels_task, dropout=task_dropout)
+        if task_head_state_dict is not None:
+            self.task_head.load_state_dict(task_head_state_dict)
+            if task_head_freeze:
+                for p in self.task_head.parameters():
+                    p.requires_grad = False
+
 
         self.adv_head = torch.nn.ModuleList()
         for n in num_labels_protected:
@@ -389,14 +398,16 @@ class AdvDiffModel(BasePruningModel):
                 "lr": learning_rate_bottleneck
             },
             {
-                "params": self.task_head.parameters(),
-                "lr": learning_rate_task_head
-            },
-            {
                 "params": self.adv_head.parameters(),
                 "lr": learning_rate_adv_head
             }
         ]
+
+        if not self.task_head_freeze:
+            optimizer_param_groups.append({
+                "params": self.task_head.parameters(),
+                "lr": learning_rate_task_head
+            })
 
         optimizer_param_groups.extend(
             self._get_diff_param_groups(learning_rate, weight_decay, learning_rate_alpha, 0)
@@ -448,7 +459,8 @@ class AdvDiffModel(BasePruningModel):
             "adv_head_state_dict": self.adv_head.state_dict(),
             "concrete_lower": self.concrete_lower,
             "concrete_upper": self.concrete_upper,
-            "structured_diff_pruning": self.structured_diff_pruning
+            "structured_diff_pruning": self.structured_diff_pruning,
+            "task_head_freeze": self.task_head_freeze
         }
 
         output_dir = Path(output_dir)
@@ -485,7 +497,8 @@ class AdvDiffModel(BasePruningModel):
             fixmask_init = info_dict['fixmask'],
             concrete_lower = info_dict['concrete_lower'],
             concrete_upper = info_dict['concrete_upper'],
-            structured_diff_pruning = info_dict['structured_diff_pruning']
+            structured_diff_pruning = info_dict['structured_diff_pruning'],
+            task_head_freeze = info_dict['task_head_freeze']
         )
 
         cls_instance.encoder.load_state_dict(info_dict['encoder_state_dict'])

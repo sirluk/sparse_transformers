@@ -98,6 +98,7 @@ def train_diff_pruning_adv(
     args_train,
     encoder_state_dict = None,
     cp_load_to_par = False,
+    task_head_state_dict = None,
     seed = None
 ):
 
@@ -118,7 +119,9 @@ def train_diff_pruning_adv(
         structured_diff_pruning = args_train.structured_diff_pruning,
         alpha_init = args_train.alpha_init,
         encoder_state_dict = encoder_state_dict,
-        state_dict_load_to_par = cp_load_to_par
+        state_dict_load_to_par = cp_load_to_par,
+        task_head_state_dict = task_head_state_dict,
+        task_head_freeze = (task_head_state_dict is not None)
     )
     trainer.to(device)
     trainer_cp = trainer.fit(
@@ -363,8 +366,8 @@ def main():
     parser.add_argument("--cpu", action="store_true", help="Run on cpu")
     parser.add_argument("--no_adv_attack", action="store_true", help="Set if you do not want to run adverserial attack after training")
     parser.add_argument("--cp_path", type=str, help="Overwrite pre-trained encoder weights")
-    parser.add_argument("--cp_modular_biased", action="store_true", help="If loading checkpoint from modular model set debiased state")
     parser.add_argument("--cp_load_to_par", action="store_true", help="initialize checkpoint weights in parametrizations (doesent work for modular model)")
+    parser.add_argument("--cp_load_task_head", action="store_true", help="load task head weights (doesent work for modular checkpoints)")
     parser.add_argument("--prot_key_idx", type=int, help="If protected key is type list: index of key to use, if none use all available attributes for taining")
     parser.add_argument("--debug", action="store_true", help="Whether to run on small subset for testing")
     parser.add_argument("--logger_suffix", type=str, help="Add addtional string to logger name")
@@ -392,13 +395,20 @@ def main():
     print(f"Device: {device}")
 
     if base_args.cp_path is not None:
-        encoder_state_dict = model_factory(
+        encoder_cp = model_factory(
             cp_path = base_args.cp_path,
             remove_parametrizations = True,
-            debiased = (not base_args.cp_modular_biased)
-        ).encoder.state_dict()
+            debiased = False # If loading checkpoint from modular model set debiased state
+        )
+        encoder_state_dict = encoder_cp.encoder.state_dict()
+        if base_args.cp_load_task_head:
+            task_head_state_dict = encoder_cp.task_head.state_dict()
+        else:
+            task_head_state_dict = None
     else:
         encoder_state_dict = None
+        task_head_state_dict = None
+
 
     train_loader, val_loader, num_labels, num_labels_protected_list, protected_key_list, protected_class_weights_list = get_data(
         args_train = args_train,
@@ -501,6 +511,7 @@ def main():
                 args_train,
                 encoder_state_dict,
                 base_args.cp_load_to_par,
+                task_head_state_dict,
                 base_args.seed
             )
         else:
