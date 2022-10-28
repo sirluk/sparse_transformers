@@ -79,6 +79,29 @@ def merge_adv_models(
     return merge_models(base_weights, *diff_weights, mean=False)
 
 
+# @torch.no_grad()
+# def merge_adv_models(
+#     *adv_model_list, base_model: BaseModel = None,  mean_diff_weights: bool = False, mean_ignore_zero: bool = False
+# ):
+#     pretrained_weights = adv_model_list[0].get_base_weights(as_module=True)
+#     diff_weights = [m.get_diff_weights(0, as_module=True) for m in adv_model_list]
+
+#     if base_model is not None:
+#         for m in diff_weights:
+#             for p_name, p in m.named_parameters():
+#                 p_pre = get_param_from_name(pretrained_weights, p_name)
+#                 p_base = get_param_from_name(base_model.encoder, p_name)
+#                 p -= (p_base - p_pre)
+#         bm = base_model.encoder
+#     else:
+#         bm = pretrained_weights
+
+#     if mean_diff_weights and len(diff_weights)>1:
+#         diff_weights = [merge_models(*diff_weights, mean=True, mean_ignore_zero=mean_ignore_zero)]
+
+#     return merge_models(bm, *diff_weights, mean=False)
+
+
 @torch.no_grad()
 def merge_modular_model(
     modular_model, mean_diff_weights: bool = False, mean_ignore_zero: bool = False
