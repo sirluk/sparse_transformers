@@ -42,11 +42,11 @@ class AdvDiffModel(BasePruningModel):
         task_head_freeze: bool = False,
         **kwargs
     ):
-        if (encoder_state_dict is not None) and (not state_dict_load_to_par):
+        if (encoder_state_dict is None) or (state_dict_load_to_par):
             super().__init__(model_name, **kwargs)
-        else:
-            super().__init__(model_name, encoder_state_dict=encoder_state_dict, **kwargs)
-
+        elif encoder_state_dict is not None:
+            super().__init__(model_name, encoder_state_dict=encoder_state_dict, **kwargs)  
+        
         if isinstance(num_labels_protected, int):
             num_labels_protected = [num_labels_protected]
 
@@ -80,7 +80,6 @@ class AdvDiffModel(BasePruningModel):
             if task_head_freeze:
                 for p in self.task_head.parameters():
                     p.requires_grad = False
-
 
         self.adv_head = torch.nn.ModuleList()
         for n in num_labels_protected:
