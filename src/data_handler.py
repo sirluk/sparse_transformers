@@ -131,9 +131,82 @@ def get_data_loader(
 
     _dataset = TensorDataset(*tds)
 
-    _loader = DataLoader(_dataset, shuffle=shuffle, batch_size=batch_size, drop_last=False, collate_fn=collate_fn)
+    return DataLoader(_dataset, shuffle=shuffle, batch_size=batch_size, drop_last=False, collate_fn=collate_fn)
 
-    return _loader
+
+def get_data_loader_triplets(
+    task_key: str,
+    protected_key: Union[str, list, tuple],
+    text_key: str,
+    tokenizer: Tokenizer,
+    data_path: Union[str, os.PathLike],
+    labels_task_path: Union[str, os.PathLike],
+    labels_prot_path: Union[str, os.PathLike, list, tuple],
+    batch_size: int = 16,
+    max_length: int = 256,
+    shuffle: bool = True,
+    debug: bool = False
+):
+
+    def batch_fn_triplets(batch):
+
+        def make_input_dict(v):
+            return {
+                "input_ids": v[0],
+                "token_type_ids": v[1],
+                "attention_mask": v[2]
+            }
+
+        # b = input_ids, token_type_ids, attention_masks, labels_task, labels_prot1, labels_prot2, ...
+        b = [torch.stack(l) for l in zip(*batch)]
+        anchor = make_input_dict(b[:3])
+        negative = make_input_dict(b[3:6])
+        positive = make_input_dict(b[6:9])
+
+        return anchor, negative, positive, *b[9:]
+
+    if isinstance(protected_key, str):
+        protected_key = [protected_key]
+    if isinstance(labels_prot_path, str):
+        labels_prot_path = [labels_prot_path]
+
+    with open(data_path, 'rb') as file:
+        data_dicts = pickle.load(file)
+
+
+    if debug:
+        cutoff = min(int(batch_size*10), len(data_dicts))
+        data_dicts = data_dicts[:cutoff]
+
+    triplet_key_pos = "input_other_pv"
+    triplet_key_neg = "input_other_tv"
+    keys = [task_key, *protected_key, text_key] + [triplet_key_pos, triplet_key_neg]
+    x = [[d[k] for k in keys] for d in data_dicts]
+
+    data = dict(zip(keys, zip(*x)))
+
+    tds = []
+    for col in [text_key, triplet_key_neg, triplet_key_pos]:
+        if col == triplet_key_pos:
+            texts, weights = zip(*data[col])
+        else:
+            texts = data[col]
+        input_ids, token_type_ids, attention_masks = multiprocess_tokenization(texts, tokenizer, max_length)
+        tds.extend([input_ids, token_type_ids, attention_masks])
+    tds.append(torch.tensor(weights))
+
+    labels_task = read_label_file(labels_task_path)
+    labels_task = torch.tensor([labels_task[str(t)] for t in data[task_key]], dtype=torch.long)
+    tds.append(labels_task)
+
+    for k, f in zip(protected_key, labels_prot_path):
+        labels_prot = read_label_file(f)
+        labels_prot = torch.tensor([labels_prot[str(t)] for t in data[k]], dtype=torch.long)
+        tds.append(labels_prot)
+
+    _dataset = TensorDataset(*tds)
+
+    return DataLoader(_dataset, shuffle=shuffle, batch_size=batch_size, drop_last=False, collate_fn=batch_fn_triplets)
 
 
 def get_num_labels(label_file: Union[str, os.PathLike]) -> int:
