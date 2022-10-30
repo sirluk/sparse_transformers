@@ -9,6 +9,8 @@ data_config_bios:
     labels_task_path: "/share/cp/datasets/nlp/text_classification_bias/bios/labels_task.txt"
     output_dir: "checkpoints_bios"
     log_dir: "logs_bios"
+    train_triplet_n1: "/share/cp/datasets/nlp/text_classification_bias/bios/only_task_balanced/train_triplet_bios_gender_nrepeat1.pkl"
+    train_triplet_n5: "/share/cp/datasets/nlp/text_classification_bias/bios/only_task_balanced/train_triplet_bios_gender_nrepeat5.pkl"
 data_config_pan16:
     task_key: "task_label"
     protected_key: ["gender", "age"]
@@ -23,6 +25,16 @@ data_config_pan16:
     labels_task_path: "/share/cp/datasets/nlp/text_classification_bias/Mention_PAN16/pickle_format/labels_task.txt"
     output_dir: "checkpoints_pan16"
     log_dir: "logs_pan16"
+    train_triplet_n1: [
+        "/share/cp/datasets/nlp/text_classification_bias/Mention_PAN16/pickle_format/train_triplet_pan16_gender_nrepeat1.pkl",
+        "/share/cp/datasets/nlp/text_classification_bias/Mention_PAN16/pickle_format/train_triplet_pan16_age_nrepeat1.pkl",
+        "/share/cp/datasets/nlp/text_classification_bias/Mention_PAN16/pickle_format/train_triplet_pan16_gender_age_nrepeat1.pkl"
+    ]
+    train_triplet_n5: [
+        "/share/cp/datasets/nlp/text_classification_bias/Mention_PAN16/pickle_format/train_triplet_pan16_gender_nrepeat5.pkl",
+        "/share/cp/datasets/nlp/text_classification_bias/Mention_PAN16/pickle_format/train_triplet_pan16_age_nrepeat5.pkl",
+        "/share/cp/datasets/nlp/text_classification_bias/Mention_PAN16/pickle_format/train_triplet_pan16_gender_age_nrepeat5.pkl"
+    ]
 data_config_hatespeech:
     task_key: "label"
     protected_key: "dialect"
@@ -34,6 +46,8 @@ data_config_hatespeech:
     labels_task_path: "/share/cp/datasets/nlp/hate_speech/Twitter/AAEpredicted/pickle_format/labels_task.txt"
     output_dir: "checkpoints_hatespeech"
     log_dir: "logs_hatespeech"
+    train_triplet_n1: "/share/cp/datasets/nlp/hate_speech/Twitter/AAEpredicted/pickle_format/train_triplet_hatespeech_dialect_nrepeat1.pkl"
+    train_triplet_n5: "/share/cp/datasets/nlp/hate_speech/Twitter/AAEpredicted/pickle_format/train_triplet_hatespeech_dialect_nrepeat5.pkl"
 model_config:
     model_name: "google/bert_uncased_L-4_H-256_A-4" # "bert-base-uncased" # "google/bert_uncased_L-4_H-256_A-4" # "google/bert_uncased_L-2_H-128_A-2"
     batch_size: 64
