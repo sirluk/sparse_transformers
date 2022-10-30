@@ -42,9 +42,9 @@ class AdvDiffModel(BasePruningModel):
         task_head_freeze: bool = False,
         **kwargs
     ):
-        if (encoder_state_dict is None) or (state_dict_load_to_par):
+        if state_dict_load_to_par:
             super().__init__(model_name, **kwargs)
-        elif encoder_state_dict is not None:
+        else:
             super().__init__(model_name, encoder_state_dict=encoder_state_dict, **kwargs)  
         
         if isinstance(num_labels_protected, int):
