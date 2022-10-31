@@ -65,7 +65,7 @@ def main():
             other_pv = []
             for k, v in protected_key_combs.items():
                 neq = [a!=b for a,b in zip(v[1:],pvs)]
-                if any(neq):
+                if v[0]==tv and any(neq):
                     other_pv.append((k, sum(neq)))
             
             other_pv_texts = [(t[-1], weight) for id, weight in other_pv for t in comb_data_dict[id]]
@@ -74,8 +74,7 @@ def main():
             other_tv_texts = [t[-1] for t in x if t[0]!=tv]
             samples_other_tv = sample_equal(data_dict[args.text_key], other_tv_texts)
 
-            triplet_subds.append((data_dict[args.text_key], data_dict[args.task_key], samples_other_pv, samples_other_tv, *[data_dict[pk] for pk in protected_key]))
-
+            triplet_subds.append((data_dict[args.text_key], samples_other_pv, samples_other_tv, data_dict[args.task_key], *[data_dict[pk] for pk in protected_key]))
 
         triplet_subds = [[v for sub_l in l for v in sub_l] for l in zip(*triplet_subds)]
 
@@ -83,10 +82,11 @@ def main():
         random.shuffle(idx_list)
         triplet_subds = [[sub_l[i] for i in idx_list] for sub_l in triplet_subds]
 
-        new_keys = [args.text_key, args.task_key, "input_other_pv", "input_other_tv", *protected_key]
-        triplet_subds = [dict(zip(new_keys, x)) for x in zip(*triplet_subds)]
-
         triplet_ds.extend(triplet_subds)
+
+    new_keys = [args.text_key, "input_other_pv", "input_other_tv", args.task_key, *protected_key]
+    triplet_ds = [dict(zip(new_keys, x)) for x in zip(*triplet_ds)]
+        
 
     with open(f"../train_triplet_{args.ds}_{'_'.join(pk)}_nrepeat{args.n_repeats}.pkl","wb") as f:
         pickle.dump(triplet_subds, f)
