@@ -185,6 +185,7 @@ def get_name_for_run(
         f"a_samples_{args_train.concrete_samples}" if args_train.concrete_samples > 1 else None,
         f"sp_pen{args_train.sparsity_pen}" if not baseline else None,
         "cp_init" if cp_path else None,
+        "triplet_loss" if args_train.triplets_loss and (adv or modular) else None,
         "weighted_loss_prot" if args_train.weighted_loss_protected and (adv or modular) else None,
         prot_attr if (adv or modular) else None,
         f"seed{seed}" if seed is not None else None,

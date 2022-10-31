@@ -99,6 +99,7 @@ def train_diff_pruning_adv(
     encoder_state_dict = None,
     cp_load_to_par = False,
     task_head_state_dict = None,
+    triplets = False,
     seed = None
 ):
 
@@ -176,6 +177,7 @@ def train_diff_pruning_modular(
     train_logger,
     args_train,
     encoder_state_dict = None,
+    triplets = False,
     seed = None
 ):
 
@@ -306,6 +308,7 @@ def train_baseline_adv(
     train_logger,
     args_train,
     encoder_state_dict = None,
+    triplets = False,
     seed = None
 ):
 
@@ -344,6 +347,7 @@ def train_baseline_adv(
         optimizer_warmup_steps = args_train.optimizer_warmup_steps,
         max_grad_norm = args_train.max_grad_norm,
         output_dir = args_train.output_dir,
+        triplets = triplets,
         protected_key = protected_key_list,
         checkpoint_name = train_logger.logger_name + ".pt",
         seed = seed
@@ -416,6 +420,7 @@ def main():
         attr_idx_prot = base_args.prot_key_idx,
         compute_class_weights = args_train.weighted_loss_protected,
         device = device[0],
+        triplets = args_train.triplets_loss,
         debug = base_args.debug
     )
 
@@ -456,6 +461,7 @@ def main():
             train_logger,
             args_train,
             encoder_state_dict,
+            args_train.triplets_loss,
             base_args.seed
         )
     elif base_args.baseline:
@@ -476,6 +482,7 @@ def main():
                 train_logger,
                 args_train,
                 encoder_state_dict,
+                args_train.triplets_loss,
                 base_args.seed
             )
         else:
@@ -512,6 +519,7 @@ def main():
                 encoder_state_dict,
                 base_args.cp_load_to_par,
                 task_head_state_dict,
+                args_train.triplets_loss,
                 base_args.seed
             )
         else:

@@ -255,6 +255,7 @@ def get_data(
     attr_idx_prot: Optional[int] = None,
     compute_class_weights: bool = False,
     device: Union[str, torch.device] = torch.device("cpu"),
+    triplets: bool = False,
     debug: bool = False
 ) -> Tuple[DataLoader, DataLoader, int, int, list, str]:
 
@@ -298,18 +299,39 @@ def get_data(
     else:
         protected_class_weights_list = [None] * len_key_prot
 
-    train_loader = get_data_loader(
-        task_key = args_train.task_key,
-        protected_key = key_prot_list,
-        text_key = args_train.text_key,
-        tokenizer = tokenizer,
-        data_path = args_train.train_pkl,
-        labels_task_path = args_train.labels_task_path,
-        labels_prot_path = labels_prot_path,
-        batch_size = args_train.batch_size,
-        max_length = max_length,
-        debug = debug
-    )
+    if triplets:
+        if use_all_attr and len(key_prot_list)>1:
+            triplet_pkl = args_train.train_triplet_all
+        else:
+            if isinstance(args_train.train_triplet, (list, tuple)):
+                triplet_pkl = args_train.train_triplet[attr_idx_prot]
+            else:
+                triplet_pkl = args_train.train_triplet
+        train_loader = get_data_loader_triplets(
+            task_key = args_train.task_key,
+            protected_key = key_prot_list,
+            text_key = args_train.text_key,
+            tokenizer = tokenizer,
+            data_path = triplet_pkl,
+            labels_task_path = args_train.labels_task_path,
+            labels_prot_path = labels_prot_path,
+            batch_size = args_train.batch_size,
+            max_length = max_length,
+            debug = debug
+        )
+    else:
+        train_loader = get_data_loader(
+            task_key = args_train.task_key,
+            protected_key = key_prot_list,
+            text_key = args_train.text_key,
+            tokenizer = tokenizer,
+            data_path = args_train.train_pkl,
+            labels_task_path = args_train.labels_task_path,
+            labels_prot_path = labels_prot_path,
+            batch_size = args_train.batch_size,
+            max_length = max_length,
+            debug = debug
+        )
     val_loader = get_data_loader(
         task_key = args_train.task_key,
         protected_key = key_prot_list,
