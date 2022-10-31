@@ -5,6 +5,7 @@ from pathlib import Path
 import torch
 from torch.utils.data import DataLoader
 from torch.optim import AdamW
+from torch.nn.functional import triplet_margin_loss
 from transformers import get_linear_schedule_with_warmup
 
 from typing import Union, Callable, Dict, Optional
@@ -96,6 +97,7 @@ class AdvModel(BaseModel):
         optimizer_warmup_steps: int,
         max_grad_norm: float,
         output_dir: Union[str, os.PathLike],
+        triplets: bool = False,
         protected_key: Optional[Union[str, list, tuple]] = None,
         checkpoint_name: Optional[str] = None,
         seed: Optional[int] = None
@@ -138,14 +140,23 @@ class AdvModel(BaseModel):
             else:
                 _adv_lambda = adv_lambda
 
-            self._step(
-                train_loader,
-                loss_fn,
-                logger,
-                max_grad_norm,
-                loss_fn_protected,
-                _adv_lambda
-            )
+            if triplets:
+                self._step_triplets(
+                    train_loader,
+                    loss_fn,
+                    logger,
+                    max_grad_norm,
+                    loss_fn_protected
+                )
+            else:             
+                self._step(
+                    train_loader,
+                    loss_fn,
+                    logger,
+                    max_grad_norm,
+                    loss_fn_protected,
+                    _adv_lambda
+                )
 
             result = self.evaluate(
                 val_loader,
@@ -258,6 +269,66 @@ class AdvModel(BaseModel):
                 "total_adv": loss.item(),
                 "task_adv": loss_task.item(),
                 "protected": loss_protected.item()
+            }
+            logger.step_loss(self.global_step, losses_dict)
+
+            epoch_iterator.set_description(epoch_str.format(step, loss.item()), refresh=True)
+
+            self.global_step += 1
+
+
+    def _step_triplets(
+        self,
+        train_loader: DataLoader,
+        loss_fn: Callable,
+        logger: TrainLogger,
+        max_grad_norm: float,
+        loss_fn_protected: Union[list, tuple]
+    ) -> None:
+        self.train()
+
+        epoch_str = "training - step {}, loss: {:7.5f}"
+        epoch_iterator = tqdm(train_loader, desc=epoch_str.format(0, math.nan), leave=False, position=1)
+        for step, batch in enumerate(epoch_iterator):
+
+            loss = 0.
+
+            inputs, neg, pos, weights, labels_task = batch[:5]
+            labels_protected = batch[5:]
+
+            inputs = dict_to_device(inputs, self.device)
+            neg = dict_to_device(neg, self.device)
+            pos = dict_to_device(pos, self.device)
+
+            hidden = self._forward(**inputs)
+            outputs_task = self.task_head(hidden)
+            loss_task = loss_fn(outputs_task, labels_task.to(self.device))
+            loss += loss_task
+
+            hidden_pos = self._forward(**pos)
+            hidden_neg = self._forward(**neg)
+            loss_triplets = triplet_margin_loss(hidden, hidden_pos, hidden_neg, margin=0, reduction="none")
+            loss_triplets = (loss_triplets * weights.to(self.device)).mean()
+            loss += (loss_triplets * len(labels_protected))
+
+            for i, (l, loss_fn_prot) in enumerate(zip(labels_protected, loss_fn_protected)):
+                outputs_protected = self.adv_head[i](hidden.detach())
+                loss_adv_head = get_mean_loss(outputs_protected, l.to(self.device), loss_fn_prot)
+                loss_adv_head.backward()
+                
+            loss.backward()
+            
+            torch.nn.utils.clip_grad_norm_(self.parameters(), max_grad_norm)
+
+            self.optimizer.step()
+            # self.scheduler.step()
+            self.zero_grad()
+
+            losses_dict = {
+                "total_adv": loss.item(),
+                "task_adv": loss_task.item(),
+                "protected": loss_adv_head.item(),
+                "triplets": loss_triplets.item()
             }
             logger.step_loss(self.global_step, losses_dict)
 
