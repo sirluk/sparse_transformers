@@ -14,16 +14,12 @@ from src.utils import (
     set_optional_args
 )
 
-torch.manual_seed(0)
-
-
 ### DEFINE MANUALLY
 CP_DIR = "/share/home/lukash/pan16/bertl4/cp/"
 # CP = "task-baseline-bert_uncased_L-4_H-256_A-4-64-2e-05-seed4.pt"
 CP = "task-diff_pruning_0.05-bert_uncased_L-4_H-256_A-4-64-2e-05-seed4.pt"
 LOAD_CP_KWARGS = {"remove_parametrizations": True}
 ### DEFINE MANUALLY
-
 
 def main():
     parser = argparse.ArgumentParser()

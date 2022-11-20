@@ -5,6 +5,7 @@ sys.path.insert(0,'..')
 import argparse
 import ruamel.yaml as yaml
 import torch
+import random
 from torch.optim import AdamW
 from torch.utils.data import DataLoader, TensorDataset
 
@@ -23,16 +24,77 @@ from src.utils import get_logger_custom, get_callables
 def merge_adv_models_wrapper(cp_gender, cp_age, cp_base = None, mean_diff_weights = True, mean_ignore_zero = False):
     model_gender = AdvDiffModel.load_checkpoint(cp_gender)
     model_age = AdvDiffModel.load_checkpoint(cp_age)
+
+    if cp_base is not None:
+        base_model = TaskModel.load_checkpoint(cp_base)
+    else:
+        base_model = None
+
     model = merge_adv_models(
         model_gender,
         model_age,
+        base_model = base_model,
         mean_diff_weights = mean_diff_weights,
         mean_ignore_zero = mean_ignore_zero
     )
-    if cp_base is not None:
-        model_task = TaskModel.load_checkpoint(cp_base)
-        model = merge_models(model_task.encoder, model.encoder, mean = False)
-    return BaseModel(model.model_name, model.state_dict())
+
+    # # TEMP for debugging
+    # model_add = merge_adv_models(
+    #     model_gender,
+    #     model_age,
+    #     base_model = base_model,
+    #     mean_diff_weights = False
+    # )
+    # model_avg = merge_adv_models(
+    #     model_gender,
+    #     model_age,
+    #     base_model = base_model,
+    #     mean_diff_weights = True,
+    #     mean_ignore_zero = True
+    # )
+    # from src.model_functions import get_param_from_name
+    # base_weights = model_gender.get_base_weights(as_module=True)
+    # for (n, padd), pavg in zip(model_add.named_parameters(), model_avg.parameters()):
+    #     if not torch.equal(padd, pavg):
+    #         n_split = n.split(".")
+    #         np = ".".join(n_split[:-1] + ["parametrizations", n_split[-1], "0.diff_weight"])
+    #         pg_diff = get_param_from_name(model_gender.encoder, np)
+    #         pa_diff = get_param_from_name(model_age.encoder, np)
+    #         p_base = get_param_from_name(base_weights, n)
+    #         indices = torch.ne(padd, pavg).flatten().nonzero().flatten()
+    #         i = indices[0].item()
+    #         import IPython; IPython.embed(); exit(1)
+    # # TEMP for debugging
+
+
+    # # TEMP for debugging
+    # from src.model_functions import get_param_from_name
+    # from tqdm import tqdm
+    # samples = []
+    # with torch.no_grad():
+    #     for n, _ in tqdm(list(model.named_parameters())):
+    #         n_split = n.split(".")
+    #         np = ".".join(n_split[:-1] + ["parametrizations", n_split[-1], "0.diff_weight"])
+    #         pg_diff = get_param_from_name(model_gender.encoder, np)
+    #         pa_diff = get_param_from_name(model_age.encoder, np)
+    #         check = torch.logical_and(torch.logical_and(pg_diff != 0, pa_diff != 0), torch.ne(pg_diff, pa_diff)).flatten()
+    #         if check.sum()>0:
+    #             samples.append((n, check.nonzero()))
+
+    # if len(samples)>0:
+    #     base_weights = model_gender.get_base_weights(as_module=True)
+    #     n, i = samples[0]
+    #     p = get_param_from_name(model, n)
+    #     np = ".".join(n.split(".")[:-1] + ["parametrizations", n.split(".")[-1], "0.diff_weight"])
+    #     p_base = get_param_from_name(base_weights, ".".join(np.split(".")[1:]))
+    #     pg_diff = get_param_from_name(model_gender.encoder, np)
+    #     pa_diff = get_param_from_name(model_age.encoder, np)
+    #     import IPython; IPython.embed(); exit(1)
+    # else:
+    #     print("no indices found with non zero diff weights for both models")
+    # # TEMP for debugging
+
+    return BaseModel(model_gender.model_name, model.state_dict())
 
 
 def merge_modular_models_wrapper(cp_modular, mean_diff_weights = True, mean_ignore_zero = False):
@@ -43,35 +105,40 @@ def merge_modular_models_wrapper(cp_modular, mean_diff_weights = True, mean_igno
 
 
 DEBUG = False
-GPU_ID = 0
-SEED = 0
+GPU_ID = 3
+SEED = 4
 DS = "pan16"
-PCT = 0.1
+PCT = 0.01
 MEAN = True
 MEAN_IGNORE_ZERO = False
+MODULAR = True
 
-# CP = {
-#     "task_model": f"/share/home/lukash/pan16/bertl4/cp/task-baseline-bert_uncased_L-4_H-256_A-4-64-2e-05-weighted_loss_prot-seed{SEED}.pt",
-#     "adv_gender": f"/share/home/lukash/pan16/bertl4/cp_cp_init/adverserial-diff_pruning_{PCT}-bert_uncased_L-4_H-256_A-4-64-2e-05-cp_init-weighted_loss_prot-gender-seed{SEED}.pt",
-#     "adv_age": f"/share/home/lukash/pan16/bertl4/cp_cp_init/adverserial-diff_pruning_{PCT}-bert_uncased_L-4_H-256_A-4-64-2e-05-cp_init-weighted_loss_prot-age-seed{SEED}.pt"
-# }
-CP = {
-    "modular_model": f"/share/home/lukash/pan16/bertl4/cp_modular/modular-diff_pruning_{PCT}-freeze_task_head-bert_uncased_L-4_H-256_A-4-64-2e-05-weighted_loss_prot-gender_age-seed{SEED}.pt"
-    # "modular_model": f"/share/home/lukash/pan16/bertl4/cp_modular/modular-diff_pruning_{PCT}-adv_task_head-bert_uncased_L-4_H-256_A-4-64-2e-05-weighted_loss_prot-gender_age-seed{SEED}.pt"
-    # "modular_model": f"/share/home/lukash/pan16/bertl4/cp_modular/modular-diff_pruning_{PCT}-bert_uncased_L-4_H-256_A-4-64-2e-05-weighted_loss_prot-gender_age-seed{SEED}.pt"
-}
+torch.manual_seed(SEED)
+random.seed(SEED)
+
+if MODULAR:
+    CP = {
+        "modular_model": f"/share/home/lukash/pan16/bertbase/cp_modular/modular-diff_pruning_{PCT}-bert-base-uncased-64-2e-05-sp_pen1.25e-07-weighted_loss_prot-gender_age-seed{SEED}.pt"
+    }
+else:
+    OTHER_SEED = [x for x in range(5) if x!=0][random.randint(0,3)]
+    CP = {
+        "task_model": None, # f"/share/home/lukash/pan16/bertbase/cp/task-baseline-bert-base-uncased-64-2e-05-seed{SEED}.pt",
+        "adv_gender": f"/share/home/lukash/pan16/bertbase/cp_cp_init/adverserial-diff_pruning_{PCT}-bert-base-uncased-64-2e-05-sp_pen1.25e-07-cp_init-weighted_loss_prot-gender-seed{SEED}.pt",
+        "adv_age": f"/share/home/lukash/pan16/bertbase/cp_cp_init/adverserial-diff_pruning_{PCT}-bert-base-uncased-64-2e-05-sp_pen1.25e-07-cp_init-weighted_loss_prot-age-seed{OTHER_SEED}.pt"
+    }
 
 LOG_DIR = f"logs_merged_masks_{DS}"
 
 LOGGER_NAME = [
     "DEBUG" if DEBUG else None,
-    "mod" if ("modular_model" in CP.keys()) else "adv",
-    "adv_task_head" if ("modular_model" in CP.keys()) and ("adv_task_head" in CP["modular_model"]) else None,
-    "frozen_task_head" if ("modular_model" in CP.keys()) and ("freeze" in CP["modular_model"]) else None,
+    "mod" if MODULAR else "adv",
+    "adv_task_head" if MODULAR and ("adv_task_head" in CP["modular_model"]) else None,
+    "frozen_task_head" if MODULAR and ("freeze" in CP["modular_model"]) else None,
     str(PCT),
     "avg" if MEAN else "additive",
     "ignore_zero" if MEAN and MEAN_IGNORE_ZERO else None,
-    f"seed{SEED}"
+    f"seed{SEED}" if MODULAR else f"seed{SEED}{OTHER_SEED}"
 ]
 LOGGER_NAME = "_".join([x for x in LOGGER_NAME if x is not None])
 
@@ -84,34 +151,20 @@ def main():
     torch.manual_seed(SEED)
     print(f"torch.manual_seed({SEED})")
 
-    # model = merge_adv_models_wrapper(
-    #     CP["adv_gender"],
-    #     CP["adv_age"],
-    #     mean_diff_weights=MEAN,
-    #     mean_ignore_zero=MEAN_IGNORE_ZERO
-    # ) # , cp_base=CP["task_model"]
-    model = merge_modular_models_wrapper(
-        CP["modular_model"],
-        mean_diff_weights=MEAN,
-        mean_ignore_zero=MEAN_IGNORE_ZERO
-    ) # , cp_base=CP["task_model"]
-
-    # # TEMP - for debugging
-    # from src.model_functions import get_param_from_name
-    
-    # samples = []
-    # for n, p in model.encoder.named_parameters():
-    #     pg_diff = get_param_from_name(model_gender.encoder, n)
-    #     pa_diff = get_param_from_name(model_age.encoder, n)
-    #     if pg_diff.flatten()[1] != pa_diff.flatten()[1]:
-    #         samples.append((n))
-
-    # n = samples[-1]
-    # p = get_param_from_name(model.encoder, n)
-    # pg = get_param_from_name(model_gender.encoder, n)
-    # pa = get_param_from_name(model_age.encoder, n)
-    # import IPython; IPython.embed(); exit(1)
-    # # TEMP - for debugging
+    if MODULAR:
+        model = merge_modular_models_wrapper(
+            CP["modular_model"],
+            mean_diff_weights=MEAN,
+            mean_ignore_zero=MEAN_IGNORE_ZERO
+        )
+    else:
+        model = merge_adv_models_wrapper(
+            CP["adv_gender"],
+            CP["adv_age"],
+            cp_base=CP["task_model"],
+            mean_diff_weights=MEAN,
+            mean_ignore_zero=MEAN_IGNORE_ZERO
+        )
 
     model.to(DEVICE)
     model.eval()
@@ -144,9 +197,11 @@ def main():
         num_labels=num_labels,
         dropout=args_train.task_dropout
     )
-    task_head.to(DEVICE)
 
+    # free up memory
     del model
+
+    task_head.to(DEVICE)
 
     ds_train = TensorDataset(train_data[0], train_data[1])
     ds_val = TensorDataset(val_data[0], val_data[1])

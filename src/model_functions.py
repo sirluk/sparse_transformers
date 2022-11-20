@@ -68,13 +68,16 @@ def merge_models(
 
 @torch.no_grad()
 def merge_adv_models(
-    *adv_model_list, mean_diff_weights: bool = False, mean_ignore_zero: bool = False
+    *adv_model_list, base_model: BaseModel = None, mean_diff_weights: bool = False, mean_ignore_zero: bool = False
 ):
     diff_weights = [m.get_diff_weights(0, as_module=True) for m in adv_model_list]
     if mean_diff_weights and len(diff_weights)>1:
         diff_weights = [merge_models(*diff_weights, mean=True, mean_ignore_zero=mean_ignore_zero)]
 
-    base_weights = adv_model_list[0].get_base_weights(as_module=True)
+    if base_model is None:
+        base_weights = adv_model_list[0].get_base_weights(as_module=True)
+    else:
+        base_weights = base_model.encoder
 
     return merge_models(base_weights, *diff_weights, mean=False)
 
