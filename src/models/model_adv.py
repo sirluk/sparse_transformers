@@ -7,6 +7,7 @@ from torch.utils.data import DataLoader
 from torch.optim import AdamW
 from torch.nn.functional import triplet_margin_loss
 from transformers import get_linear_schedule_with_warmup
+from collections import OrderedDict
 
 from typing import Union, Callable, Dict, Optional
 
@@ -31,6 +32,8 @@ class AdvModel(BaseModel):
         bottleneck: bool = False,
         bottleneck_dim: Optional[int] = None,
         bottleneck_dropout: Optional[float] = None,
+        task_head_state_dict: OrderedDict = None,
+        task_head_freeze: bool = False,
         **kwargs
     ):
         super().__init__(model_name, **kwargs)
@@ -48,6 +51,7 @@ class AdvModel(BaseModel):
         self.has_bottleneck = bottleneck
         self.bottleneck_dim = bottleneck_dim
         self.bottleneck_dropout = bottleneck_dropout
+        self.task_head_freeze = task_head_freeze
 
         # bottleneck layer
         if self.has_bottleneck:
@@ -59,6 +63,11 @@ class AdvModel(BaseModel):
 
         # heads
         self.task_head = ClfHead([self.in_size_heads]*(task_n_hidden+1), num_labels_task, dropout=task_dropout)
+        if task_head_state_dict is not None:
+            self.task_head.load_state_dict(task_head_state_dict)
+            if task_head_freeze:
+                for p in self.task_head.parameters():
+                    p.requires_grad = False
 
         self.adv_head = torch.nn.ModuleList()
         for n in num_labels_protected:

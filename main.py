@@ -308,6 +308,7 @@ def train_baseline_adv(
     train_logger,
     args_train,
     encoder_state_dict = None,
+    task_head_state_dict = None,
     triplets = False,
     seed = None
 ):
@@ -324,6 +325,8 @@ def train_baseline_adv(
         bottleneck = args_train.bottleneck,
         bottleneck_dim = args_train.bottleneck_dim,
         bottleneck_dropout = args_train.bottleneck_dropout,
+        task_head_state_dict = task_head_state_dict,
+        task_head_freeze = (task_head_state_dict is not None),
         encoder_state_dict = encoder_state_dict
     )
     trainer.to(device)
@@ -482,6 +485,7 @@ def main():
                 train_logger,
                 args_train,
                 encoder_state_dict,
+                task_head_state_dict,
                 args_train.triplets_loss,
                 base_args.seed
             )
