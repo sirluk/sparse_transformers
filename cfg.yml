@@ -86,7 +86,7 @@ train_config:
     modular_merged_cutoff: False
     modular_merged_min_pct: 0.01
 adv_attack:
-    num_epochs: 40
+    num_epochs: 200
     learning_rate: 1e-4
     adv_n_hidden: 1
     adv_count: 5
