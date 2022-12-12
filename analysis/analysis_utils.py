@@ -1,14 +1,61 @@
+import sys
+sys.path.insert(0,'..')
+
 import os
 import re
 import numpy as np
 import torch
 
-from typing import List, Tuple
+from typing import List, Tuple, Optional
+
+from src.model_functions import model_factory
 
 
-def get_sparsity_info(folder, experiment_name, model_cls, n_seeds = 5):
+def get_sparsity_for_model(model, absolute: bool = False, par_idx: Optional[int] = None):
 
-    sparsity_fn = lambda x: round(x[2]/x[0],2)
+    if absolute:
+        sparsity_fn = lambda x: x
+    else:
+        sparsity_fn = lambda x: round(x[2]/x[0],2)
+
+    model_dict = {}
+    for n,m in model.get_encoder_base_modules(return_names=True):
+        # n_p, n_p_zero, n_p_one
+        if par_idx is None:
+            model_dict[n] = [model._count_non_zero_params_for_module(m, idx) for idx in range(model.n_parametrizations)]
+        else:
+            model_dict[n] = [model._count_non_zero_params_for_module(m, par_idx)]
+
+    model_module_dict = {}
+    unique_modules = set([(x[11:] if x[:10]=="embeddings" else ".".join(x.split(".")[3:])) for x in model_dict.keys() if x!="pooler.dense"])
+    for module_name in unique_modules:
+        for k,v in model_dict.items():
+            if k[-len(module_name):] == module_name:
+                try:
+                    model_module_dict[module_name] += np.array(v)
+                except KeyError:
+                    model_module_dict[module_name] = np.array(v)
+    model_module_dict = {k:[sparsity_fn(v) for v in vals] for k,vals in model_module_dict.items()}
+    model_dict = {k:[sparsity_fn(v) for v in vals] for k,vals in model_dict.items()}
+
+    if par_idx is None:
+        dicts = [model._count_non_zero_params_per_layer(idx) for idx in range(model.n_parametrizations)]
+    else:
+        dicts = [model._count_non_zero_params_per_layer(par_idx)]
+
+    model_layer_dict = {}
+    for d in dicts:
+        for k,v in d.items():
+            sparsity = sparsity_fn(v)
+            try:
+                model_layer_dict[k].append(sparsity)
+            except KeyError:
+                model_layer_dict[k] = [sparsity]
+
+    return model_dict, model_module_dict, model_layer_dict
+
+
+def get_sparsity_info(folder, experiment_name, n_seeds = 5, absolute: bool = False, par_idx: Optional[int] = None):
 
     model_dicts = []
     model_layer_dicts = []
@@ -16,39 +63,45 @@ def get_sparsity_info(folder, experiment_name, model_cls, n_seeds = 5):
     for seed in range(n_seeds):
 
         filepath = os.path.join(folder, experiment_name.format(seed))
-        model = model_cls.load_checkpoint(filepath)
+        model = model_factory(filepath)
 
-        model_dict = {}
-        for n,m in model.get_encoder_base_modules(return_names=True):
-            # n_p, n_p_zero, n_p_one
-            model_dict[n] = [model._count_non_zero_params_for_module(m, idx) for idx in range(model.n_parametrizations)]
-
-        model_module_dict = {}
-        unique_modules = set([(x[11:] if x[:10]=="embeddings" else x[16:]) for x in model_dict.keys() if x!="pooler.dense"])
-        for module_name in unique_modules:
-            for k,v in model_dict.items():
-                if k[-len(module_name):] == module_name:
-                    try:
-                        model_module_dict[module_name] += np.array(v)
-                    except KeyError:
-                        model_module_dict[module_name] = np.array(v)
-        model_module_dict = {k:[sparsity_fn(v) for v in vals] for k,vals in model_module_dict.items()}
-        model_dict = {k:[sparsity_fn(v) for v in vals] for k,vals in model_dict.items()}
-
+        model_dict, model_module_dict, model_layer_dict = get_sparsity_for_model(model, absolute, par_idx)
         model_dicts.append(model_dict)
         model_module_dicts.append(model_module_dict)
+        model_layer_dicts.append(model_layer_dict)
+        
 
-        dicts = [model._count_non_zero_params_per_layer(idx) for idx in range(model.n_parametrizations)]
+        # model_dict = {}
+        # for n,m in model.get_encoder_base_modules(return_names=True):
+        #     # n_p, n_p_zero, n_p_one
+        #     model_dict[n] = [model._count_non_zero_params_for_module(m, idx) for idx in range(model.n_parametrizations)]
 
-        merged_dict = {}
-        for d in dicts:
-            for k,v in d.items():
-                sparsity = sparsity_fn(v)
-                try:
-                    merged_dict[k].append(sparsity)
-                except KeyError:
-                    merged_dict[k] = [sparsity]
-        model_layer_dicts.append(merged_dict)
+        # model_module_dict = {}
+        # unique_modules = set([(x[11:] if x[:10]=="embeddings" else x[16:]) for x in model_dict.keys() if x!="pooler.dense"])
+        # for module_name in unique_modules:
+        #     for k,v in model_dict.items():
+        #         if k[-len(module_name):] == module_name:
+        #             try:
+        #                 model_module_dict[module_name] += np.array(v)
+        #             except KeyError:
+        #                 model_module_dict[module_name] = np.array(v)
+        # model_module_dict = {k:[sparsity_fn(v) for v in vals] for k,vals in model_module_dict.items()}
+        # model_dict = {k:[sparsity_fn(v) for v in vals] for k,vals in model_dict.items()}
+
+        # model_dicts.append(model_dict)
+        # model_module_dicts.append(model_module_dict)
+
+        # dicts = [model._count_non_zero_params_per_layer(idx) for idx in range(model.n_parametrizations)]
+
+        # merged_dict = {}
+        # for d in dicts:
+        #     for k,v in d.items():
+        #         sparsity = sparsity_fn(v)
+        #         try:
+        #             merged_dict[k].append(sparsity)
+        #         except KeyError:
+        #             merged_dict[k] = [sparsity]
+        # model_layer_dicts.append(merged_dict)
 
     return model_dicts, model_layer_dicts, model_module_dicts
 
@@ -70,7 +123,7 @@ def merge_info_dicts(*dicts):
 
 def get_viz_data(model_dicts, model_layer_dicts, model_module_dicts):
 
-    n_layers = len(model_layer_dicts[0].keys()) - 1 # -1 to account for embedding layer
+    n_layers = len(model_layer_dicts[0]) - 1 # -1 to account for embedding layer
 
     base_dict = {}
     for i in model_dicts[0].keys():
@@ -93,8 +146,9 @@ def get_viz_data(model_dicts, model_layer_dicts, model_module_dicts):
         n = layer_name.format(i)
         d = {}
         for k, v in base_dict.items():
-            if k[:15] == n:
-                d[k[16:]] = v
+            k_ = k.split(".")
+            if ".".join(k_[:3]) == n:
+                d[".".join(k_[3:])] = v
         layer_list.append(d)
 
     emb_dict = {k[11:]:v for k,v in base_dict.items() if k[:10]=="embeddings"}
@@ -102,7 +156,7 @@ def get_viz_data(model_dicts, model_layer_dicts, model_module_dicts):
     return base_dict, layer_dict, module_dict, emb_dict, layer_list
 
 
-def get_nonzero_dicts(model_list: List[List[Tuple]]):
+def get_nonzero_dicts(model_list: List[List[Tuple]], only_nonzero = True):
 
     diff_masks = list(zip(*model_list))
     diff_masks_merged = {x[0][0]: torch.stack([y[1].data.requires_grad_(False) for y in x]) for x in diff_masks}
@@ -113,13 +167,20 @@ def get_nonzero_dicts(model_list: List[List[Tuple]]):
             continue
         k = ".".join(k.split(".")[:-1])
         v_bool = v.bool()
-        weight_sums = torch.maximum(v_bool.sum(0), (~v_bool).sum(0))
-        total = weight_sums.numel()
+        total = v[0].numel()
+
+        if only_nonzero:
+            x = v_bool.sum(0)
+        else:
+            x = torch.maximum(v_bool.sum(0), (~v_bool).sum(0))
+
         n_nonzero = [total]
         for i in range(len(model_list)+1):
-            n_nonzero.append((weight_sums == i).sum().item())
+            n_nonzero.append((x == i).sum().item())
         # n_some_nonzero = torch.logical_and((weight_sums>0), (weight_sums<5)).sum().item()
         res = np.array(n_nonzero)
+        
+        # merge weight and bias
         try:
             base_nonzero_dict[k] += res
         except KeyError:

@@ -92,6 +92,8 @@ def adv_attack(
         desc = logger_suffix
     )
 
+    return adv_head
+
 
 def run_adv_attack(
     base_args,
