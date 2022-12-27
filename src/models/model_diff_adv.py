@@ -12,6 +12,7 @@ from typing import Union, Callable, Dict, Optional
 
 from src.models.model_heads import ClfHead, AdvHead
 from src.models.model_base import BasePruningModel
+from src.models.model_adv import AdvModel
 from src.training_logger import TrainLogger
 from src.utils import dict_to_device, evaluate_model, get_mean_loss
 
@@ -506,10 +507,32 @@ class AdvDiffModel(BasePruningModel):
         cls_instance.adv_head.load_state_dict(info_dict['adv_head_state_dict'])
 
         if remove_parametrizations:
+
             cls_instance._remove_parametrizations()
+            
+            unparametrized_model = AdvModel(
+                model_name = info_dict['model_name'],
+                num_labels_task = info_dict['num_labels_task'],
+                num_labels_protected = info_dict['num_labels_protected'],
+                task_dropout = info_dict['task_dropout'],
+                task_n_hidden = info_dict['task_n_hidden'],
+                adv_dropout = info_dict['adv_dropout'],
+                adv_n_hidden = info_dict['adv_n_hidden'],
+                adv_count = info_dict['adv_count'],
+                bottleneck = info_dict['bottleneck'],
+                bottleneck_dim = info_dict['bottleneck_dim'],
+                bottleneck_dropout = info_dict['bottleneck_dropout']                 
+            )
+            unparametrized_model.encoder.load_state_dict(cls_instance.encoder.state_dict())
+            unparametrized_model.task_head.load_state_dict(cls_instance.task_head.state_dict())
+            unparametrized_model.adv_head.load_state_dict(cls_instance.adv_head.state_dict())
 
-        cls_instance.eval()
+            unparametrized_model.eval()
+            return unparametrized_model
 
-        return cls_instance
+        else:
+
+            cls_instance.eval()
+            return cls_instance
 
 

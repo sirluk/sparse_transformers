@@ -12,6 +12,7 @@ from typing import Union, Callable, Dict, Optional
 
 from src.models.model_heads import ClfHead
 from src.models.model_base import BasePruningModel
+from src.models.model_task import TaskModel
 from src.training_logger import TrainLogger
 from src.utils import dict_to_device, evaluate_model
 
@@ -402,10 +403,27 @@ class TaskDiffModel(BasePruningModel):
         cls_instance.task_head.load_state_dict(info_dict['task_head_state_dict'])
 
         if remove_parametrizations:
+
             cls_instance._remove_parametrizations()
 
-        cls_instance.eval()
+            unparametrized_model = TaskModel(
+                model_name = info_dict['model_name'],
+                num_labels = info_dict['num_labels'],
+                dropout = info_dict['dropout'],
+                n_hidden = info_dict['n_hidden'],
+                bottleneck = info_dict['bottleneck'],
+                bottleneck_dim = info_dict['bottleneck_dim'],
+                bottleneck_dropout = info_dict['bottleneck_dropout']                 
+            )
+            unparametrized_model.encoder.load_state_dict(cls_instance.encoder.state_dict())
+            unparametrized_model.task_head.load_state_dict(cls_instance.task_head[cls_instance._task_head_idx].state_dict())
 
-        return cls_instance
+            unparametrized_model.eval()
+            return unparametrized_model
+
+        else:
+
+            cls_instance.eval()
+            return cls_instance
 
 

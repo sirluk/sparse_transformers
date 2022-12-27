@@ -469,7 +469,7 @@ class BasePruningModel(BaseModel):
                 par_list = reduce(lambda a,b: getattr(a,b), [self.encoder] + p_name.split("."))
                 par = par_list[idx]
                 if isinstance(par, DiffWeightFixmask):
-                    diff_weight = par.diff_weight
+                    diff_weight = par.mask * par.diff_weight
                 elif isinstance(par, DiffWeightFinetune):
                     w = par_list.original.detach()
                     diff_weight = par.diff_weight(w)

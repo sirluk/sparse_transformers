@@ -16,7 +16,7 @@ def get_sparsity_for_model(model, absolute: bool = False, par_idx: Optional[int]
     if absolute:
         sparsity_fn = lambda x: x
     else:
-        sparsity_fn = lambda x: round(x[2]/x[0],2)
+        sparsity_fn = lambda x: x[2]/x[0]
 
     model_dict = {}
     for n,m in model.get_encoder_base_modules(return_names=True):

@@ -416,7 +416,8 @@ class AdvModel(BaseModel):
             "encoder_state_dict": self.encoder_module.state_dict(),
             "bottleneck_state_dict": self.bottleneck.state_dict(),
             "task_head_state_dict": self.task_head.state_dict(),
-            "adv_head_state_dict": self.adv_head.state_dict()
+            "adv_head_state_dict": self.adv_head.state_dict(),
+            "task_head_freeze": self.task_head_freeze
         }
 
         output_dir = Path(output_dir)
@@ -448,7 +449,8 @@ class AdvModel(BaseModel):
             info_dict['adv_count'],
             info_dict['bottleneck'],
             info_dict['bottleneck_dim'],
-            info_dict['bottleneck_dropout']
+            info_dict['bottleneck_dropout'],
+            info_dict['task_head_freeze']
         )
 
         cls_instance.encoder.load_state_dict(info_dict['encoder_state_dict'])
