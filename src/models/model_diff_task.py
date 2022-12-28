@@ -416,7 +416,7 @@ class TaskDiffModel(BasePruningModel):
                 bottleneck_dropout = info_dict['bottleneck_dropout']                 
             )
             unparametrized_model.encoder.load_state_dict(cls_instance.encoder.state_dict())
-            unparametrized_model.task_head.load_state_dict(cls_instance.task_head[cls_instance._task_head_idx].state_dict())
+            unparametrized_model.task_head.load_state_dict(cls_instance.task_head.state_dict())
 
             unparametrized_model.eval()
             return unparametrized_model
