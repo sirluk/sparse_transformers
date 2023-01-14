@@ -26,6 +26,10 @@ def get_sparsity_for_model(model, absolute: bool = False, par_idx: Optional[int]
         else:
             model_dict[n] = [model._count_non_zero_params_for_module(m, par_idx)]
 
+    # overall
+    overall = np.array(list(model_dict.values())).squeeze().sum(axis=0)
+    overall_sparsity = [sparsity_fn(overall)]
+
     model_module_dict = {}
     unique_modules = set([(x[11:] if x[:10]=="embeddings" else ".".join(x.split(".")[3:])) for x in model_dict.keys() if x!="pooler.dense"])
     for module_name in unique_modules:
@@ -52,7 +56,7 @@ def get_sparsity_for_model(model, absolute: bool = False, par_idx: Optional[int]
             except KeyError:
                 model_layer_dict[k] = [sparsity]
 
-    return model_dict, model_module_dict, model_layer_dict
+    return model_dict, model_module_dict, model_layer_dict, overall_sparsity
 
 
 def get_sparsity_info(folder, experiment_name, n_seeds = 5, absolute: bool = False, par_idx: Optional[int] = None):
@@ -60,15 +64,17 @@ def get_sparsity_info(folder, experiment_name, n_seeds = 5, absolute: bool = Fal
     model_dicts = []
     model_layer_dicts = []
     model_module_dicts = []
+    overall = []
     for seed in range(n_seeds):
 
         filepath = os.path.join(folder, experiment_name.format(seed))
         model = model_factory(filepath)
 
-        model_dict, model_module_dict, model_layer_dict = get_sparsity_for_model(model, absolute, par_idx)
+        model_dict, model_module_dict, model_layer_dict, overall_sparsity = get_sparsity_for_model(model, absolute, par_idx)
         model_dicts.append(model_dict)
         model_module_dicts.append(model_module_dict)
         model_layer_dicts.append(model_layer_dict)
+        overall.append(overall_sparsity)
         
 
         # model_dict = {}
@@ -103,7 +109,7 @@ def get_sparsity_info(folder, experiment_name, n_seeds = 5, absolute: bool = Fal
         #             merged_dict[k] = [sparsity]
         # model_layer_dicts.append(merged_dict)
 
-    return model_dicts, model_layer_dicts, model_module_dicts
+    return model_dicts, model_layer_dicts, model_module_dicts, overall
 
 
 def merge_info_dicts(*dicts):

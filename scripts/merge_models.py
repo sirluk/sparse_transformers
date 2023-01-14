@@ -126,8 +126,10 @@ else:
     OTHER_SEED = SEED if SAME_SEED else [x for x in range(5) if x!=0][random.randint(0,3)]
     CP = {
         "task_model": None, # f"/share/home/lukash/pan16/bertbase/cp/task-baseline-bert-base-uncased-64-2e-05-seed{SEED}.pt",
-        "adv_gender": f"/share/home/lukash/pan16/bertl4/cp_cp_init/adverserial-diff_pruning_{PCT}-bert_uncased_L-4_H-256_A-4-64-2e-05-sp_pen1.25e-07-cp_init-weighted_loss_prot-gender-seed{SEED}.pt",
-        "adv_age": f"/share/home/lukash/pan16/bertl4/cp_cp_init/adverserial-diff_pruning_{PCT}-bert_uncased_L-4_H-256_A-4-64-2e-05-sp_pen1.25e-07-cp_init-weighted_loss_prot-age-seed{OTHER_SEED}.pt"
+        # "adv_gender": f"/share/home/lukash/pan16/bertl4/cp_cp_init/adverserial-diff_pruning_{PCT}-sparse_task-bert_uncased_L-4_H-256_A-4-64-2e-05-sp_pen1.25e-07-cp_init-weighted_loss_prot-gender-seed{SEED}.pt",
+        # "adv_age": f"/share/home/lukash/pan16/bertl4/cp_cp_init/adverserial-diff_pruning_{PCT}-sparse_task-bert_uncased_L-4_H-256_A-4-64-2e-05-sp_pen1.25e-07-cp_init-weighted_loss_prot-age-seed{OTHER_SEED}.pt"
+        "adv_gender": f"/share/home/lukash/pan16/bertbase/cp_cp_init/adverserial-diff_pruning_{PCT}-sparse_task-bert-base-uncased-64-2e-05-sp_pen1.25e-07-cp_init-weighted_loss_prot-gender-seed{SEED}.pt",
+        "adv_age": f"/share/home/lukash/pan16/bertbase/cp_cp_init/adverserial-diff_pruning_{PCT}-sparse_task-bert-base-uncased-64-2e-05-sp_pen1.25e-07-cp_init-weighted_loss_prot-age-seed{OTHER_SEED}.pt"
     }
 
 LOG_DIR = f"logs_merged_masks_{DS}"
